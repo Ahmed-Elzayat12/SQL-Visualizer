@@ -1,0 +1,890 @@
+أنا شايف إن دي ممكن تبقى أداة قوية جدًا لأي Backend Engineer، خصوصًا اللي بيشتغل بـ PostgreSQL وTypeORM وNestJS.
+
+والفكرة مش مجرد SQL Visualizer. إحنا عايزين نبني Interactive SQL Debugger & Learning Platform، تقدر تديله JavaScript أو TypeScript فيه SQL Query، وهو يفهم الكود، يستخرج الكويري، ويعرضلك رحلة البيانات من أول الـ Database لحد النتيجة النهائية.
+
+مثلًا تحط الكويري بتاعتك، فيطلعلك:
+
+Query Execution Journey
+
+Interactive Preview
+
+reporting_vehicle_gps_track_batches
+
+Original GPS records
+
+filtered
+
+WHERE + flags
+
+totals
+
+GROUP BY vehicleId
+
+latest_fix
+
+DISTINCT ON
+
+latest_receipt
+
+Latest batch
+
+labeled
+
+JOIN + calculated metrics + healthStatus
+
+تصور مبدئي للشكل المطلوب. الضغط على كل مرحلة يفتح البيانات قبل وبعد العملية، مع شرح لها.
+
+جهزتلك Prompt تفصيلي بالإنجليزي علشان تديه لـ Cursor أو Claude Code أو Codex. مركز فيه على إن الـ AI يبني منتج شغال فعلًا، مش مجرد Dashboard شكله حلو ببيانات وهمية.
+
+## الـ Prompt الجاهز
+
+# Build QueryScope — Interactive SQL & JavaScript Query Visualizer
+
+You are a Senior Full-Stack Engineer, Database Internals Engineer, SQL Parser Engineer, and Product Designer.
+
+I want you to design and build a production-quality web application called **QueryScope**.
+
+QueryScope is an interactive SQL visualization, debugging, and learning platform designed for backend engineers.
+
+**The main idea:**
+
+A developer pastes real JavaScript or TypeScript backend code containing SQL queries. The application analyzes the source code, extracts the SQL, identifies dynamic parameters, understands the query structure, and creates an interactive visualization explaining how the data flows through the query.
+
+The developer should be able to click any SQL operation or Common Table Expression (CTE) and understand:
+
+- What this operation does.
+- Why it exists.
+- Which tables and columns it reads.
+- What data enters the operation.
+- What data comes out.
+- How rows and columns are transformed.
+- How the operation affects the final result.
+- What potential performance problems exist.
+
+**This is NOT simply a SQL formatter, SQL editor, or generic flowchart generator.**
+
+The core product must be a real interactive learning and debugging tool that helps developers mentally visualize complex SQL.
+
+---
+
+## 1. Tech Stack
+
+Build a modern full-stack application using:
+
+**Frontend:**
+
+- Next.js with React and TypeScript
+- Tailwind CSS
+- shadcn/ui
+- React Flow (@xyflow/react) for interactive data-flow diagrams
+- Monaco Editor for JavaScript, TypeScript, and SQL editing
+- TanStack Table for interactive data tables
+- Zustand for synchronized application state
+- Lucide icons
+- Framer Motion or Motion for meaningful animations
+
+**Backend:**
+
+- Node.js with TypeScript
+- Modular API architecture
+- A real JavaScript/TypeScript AST parser using Babel or TypeScript Compiler API
+- A PostgreSQL-aware SQL parser that produces a structured AST
+- A query analysis engine
+- A data-lineage engine
+- A logical execution-step generator
+- An optional isolated PostgreSQL execution environment
+
+Choose mature and actively maintained libraries. Explain any important architectural choices.
+
+Organize the code cleanly, with a strong separation between parsing, semantic analysis, data simulation, visualization, and AI explanations.
+
+---
+
+## 2. Main User Experience
+
+The user opens the application and sees a professional developer workspace.
+
+### Main layout
+
+**Left panel — Code Editor**
+
+A Monaco Editor where the user can paste:
+
+1. Raw PostgreSQL queries.
+2. JavaScript code containing SQL strings.
+3. TypeScript code containing SQL template literals.
+4. Queries generated dynamically using variables.
+5. SQL inside NestJS services or repositories.
+
+Support syntax highlighting, line numbers, and error indicators.
+
+**Center panel — Interactive Query Visualization**
+
+Display a beautiful, interactive flowchart showing how data moves between tables, operations, and CTEs.
+
+Support:
+
+- Zoom and pan.
+- Dragging nodes.
+- Automatic graph layout.
+- Directional edges.
+- Highlighting upstream dependencies.
+- Highlighting downstream consumers.
+- Selecting a node to inspect it.
+- Showing the number of rows entering and leaving an operation when real execution data is available.
+- Showing how multiple branches merge through JOIN operations.
+
+**Right panel — Operation Inspector**
+
+When the user clicks an operation, display:
+
+- Operation name.
+- Plain-English explanation.
+- Egyptian Arabic explanation.
+- SQL fragment responsible for the operation.
+- Input tables.
+- Output columns.
+- Input data preview.
+- Output data preview.
+- Before/after comparison.
+- Column lineage.
+- Performance considerations.
+- Relevant SQL concepts.
+
+The user must understand each step without needing to be an SQL expert.
+
+---
+
+## 3. Understand JavaScript and TypeScript SQL
+
+This is one of the most important features.
+
+The application must accept code like:
+
+`const query = \`SELECT \* FROM users WHERE id = ${userId}\`;\`
+
+And also more complex code containing:
+
+- SQL template literals.
+- Nested template expressions.
+- Dynamic WHERE conditions.
+- Dynamically built SQL fragments.
+- Array joins such as `predicates.join(' AND ')`.
+- Conditional query construction.
+- Parameters such as `$1`, `$2`, `$3`.
+- Locally defined constants.
+- Imported variables and helper functions.
+- Tagged SQL templates when they can be statically recognized.
+- SQL generated inside NestJS service methods.
+
+### Critical requirements
+
+Do NOT treat JavaScript as raw SQL.
+
+First parse JavaScript/TypeScript with an actual AST parser.
+
+Identify SQL strings and trace their construction where possible.
+
+Statically evaluate only expressions that can be resolved safely and deterministically.
+
+For example, when code contains:
+
+`${valid}`
+
+`${anomaly}`
+
+`${predicates.join(' AND ')}`
+
+The application must:
+
+1. Locate the referenced JavaScript expressions.
+2. Attempt to resolve their values from available source code.
+3. Reconstruct the final SQL when possible.
+4. Preserve PostgreSQL query parameters.
+5. Show unresolved expressions in an interactive panel.
+6. Allow the user to provide missing expression values and parameters.
+7. Rebuild the query after the user supplies those values.
+
+Never silently invent missing values.
+
+Never execute arbitrary pasted JavaScript with eval or an unrestricted VM.
+
+If the generated SQL cannot be fully reconstructed from the supplied source, explain precisely why and what additional information is required.
+
+Provide a second input option where users can paste the actual final SQL and bound parameters captured from their application.
+
+This must work even when static reconstruction is impossible.
+
+---
+
+## 4. PostgreSQL SQL Parsing and Understanding
+
+Create a robust PostgreSQL-aware SQL analysis engine.
+
+It must understand complex queries containing:
+
+- SELECT, WHERE, ORDER BY, LIMIT, OFFSET
+- INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL JOIN
+- GROUP BY, HAVING
+- COUNT, SUM, MAX, MIN, AVG
+- Aggregate FILTER clauses
+- DISTINCT and PostgreSQL DISTINCT ON
+- Common Table Expressions (WITH)
+- MATERIALIZED and NOT MATERIALIZED CTEs
+- Nested queries and subqueries
+- CASE WHEN
+- COALESCE, NULLIF, GREATEST, LEAST
+- EXTRACT(EPOCH FROM ...)
+- Timestamp arithmetic and interval expressions
+- CAST and PostgreSQL `::` casting syntax
+- Window functions and PARTITION BY
+- UNION and UNION ALL
+- JSON and JSONB functions
+- Complex expressions and boolean predicates
+- Positional query parameters
+
+Use a proper PostgreSQL-compatible parser rather than relying on regular expressions.
+
+Do not claim full PostgreSQL coverage unless it has been implemented and tested.
+
+On unsupported syntax, show the exact limitation without fabricating a parsed interpretation.
+
+---
+
+## 5. Automatic CTE Dependency Graph
+
+This feature is essential.
+
+Consider a SQL query containing:
+
+- `filtered`
+- `totals`
+- `latest_fix`
+- `latest_receipt`
+- `labeled`
+- `matched`
+- `statuses`
+- `sources`
+
+The application must automatically detect the relationships between these CTEs.
+
+For example:
+
+- `filtered` reads the original GPS table.
+- `totals` reads `filtered`.
+- `latest_fix` reads `filtered` and `totals`.
+- `latest_receipt` reads `filtered` and `totals`.
+- `labeled` joins `totals`, `latest_fix`, and `latest_receipt`.
+- `matched` reads `labeled`.
+- `statuses` aggregates `labeled`.
+- `sources` joins `filtered` and `matched`.
+
+Generate a dependency DAG showing those relationships.
+
+Distinguish between:
+
+**CTE Dependency View:** How the SQL CTEs depend on each other.
+
+**Logical Operations View:** The relational operations inside each CTE.
+
+**Physical Execution Plan View:** The execution strategy chosen by PostgreSQL when an actual EXPLAIN plan is available.
+
+These are different concepts and must never be misrepresented as the same thing.
+
+Allow users to switch between these views.
+
+---
+
+## 6. Interactive Step-by-Step Query Explorer
+
+This is the most important feature of the entire application.
+
+I want an experience similar to a debugger for SQL.
+
+Create controls:
+
+- Previous Step
+- Next Step
+- Play
+- Pause
+- Reset
+- Jump to Step
+
+The application should walk through the logical query transformations.
+
+Example:
+
+**Step 1 — Read the source table**
+
+Show the original table rows.
+
+Explain that the query begins with a source relation and which columns are relevant.
+
+**Step 2 — Apply WHERE**
+
+Show rows before filtering.
+
+Highlight rows that satisfy the condition.
+
+Mark excluded rows.
+
+Then display the filtered output.
+
+Explain the condition in natural language.
+
+**Step 3 — Calculate derived columns**
+
+For example:
+
+`("pointCount" > 0) AS usable`
+
+Show how the expression is evaluated for every row.
+
+Highlight newly created columns.
+
+Explain the calculation.
+
+**Step 4 — GROUP BY vehicleId**
+
+Animate how rows belonging to the same vehicle are grouped.
+
+Show the grouped rows visually.
+
+Calculate:
+
+- COUNT(\*)
+- SUM(pointCount)
+- COUNT(\*) FILTER (WHERE ...)
+- MAX(windowEnd)
+
+Display the resulting aggregate table.
+
+**Step 5 — DISTINCT ON**
+
+Show candidate rows.
+
+Explain the ordering rules.
+
+Highlight the selected row for each vehicle.
+
+Explain why that particular row was chosen.
+
+**Step 6 — JOIN**
+
+Show two tables side by side.
+
+Highlight matching join keys.
+
+Display matched and unmatched rows.
+
+Explain how INNER JOIN differs from LEFT JOIN.
+
+Show the resulting table.
+
+**Step 7 — CASE WHEN**
+
+Evaluate conditions in order for each row.
+
+Highlight the first matching condition.
+
+Show the computed health status.
+
+**Step 8 — Final result**
+
+Show how the intermediate results combine to produce the final output.
+
+All steps must be derived from the SQL AST and its semantics, not from hardcoded query examples.
+
+---
+
+## 7. Visualize Intermediate Tables
+
+Every operation should have an interactive table preview.
+
+The user must be able to see:
+
+**Before Operation → Transformation → After Operation**
+
+For example:
+
+Before GROUP BY:
+
+| vehicleId | pointCount |
+| --------- | ---------- |
+| 101       | 3          |
+| 101       | 5          |
+| 102       | 2          |
+
+After GROUP BY:
+
+| vehicleId | totalPoints |
+| --------- | ----------- |
+| 101       | 8           |
+| 102       | 2           |
+
+Provide useful visual effects:
+
+- Highlight rows being filtered.
+- Highlight rows being joined.
+- Highlight aggregation groups.
+- Highlight new calculated columns.
+- Highlight rows selected by DISTINCT ON.
+- Highlight NULL values.
+- Show row counts when known.
+
+All previews must clearly distinguish between:
+
+1. Actual results from executing the query.
+2. User-provided sample data.
+3. Generated illustrative examples.
+
+Never present generated example rows as real execution output.
+
+---
+
+## 8. Three Data Modes
+
+Provide three modes.
+
+### Mode A — Structure Only
+
+Works immediately without a database.
+
+The user pastes SQL or JavaScript code.
+
+The application:
+
+- Extracts SQL.
+- Parses its structure.
+- Builds the CTE graph.
+- Explains operations.
+- Shows column lineage.
+- Displays inferred table structures where possible.
+
+If actual records are unavailable, explain that real intermediate row values cannot be determined.
+
+### Mode B — Sample Data Simulation
+
+The user provides table schemas and example data, or generates synthetic data.
+
+Allow importing CSV and JSON files.
+
+The application uses those tables to execute the query in a controlled PostgreSQL-compatible environment.
+
+The generated data must match the query schema and clearly be identified as synthetic.
+
+Show intermediate results calculated from the supplied data.
+
+### Mode C — PostgreSQL Execution Analysis
+
+An optional advanced mode.
+
+Allow users to inspect a PostgreSQL query using a real execution plan.
+
+Support importing:
+
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`
+
+Visualize:
+
+- Sequential scans.
+- Index scans.
+- Joins.
+- Sorts.
+- Hash aggregates.
+- CTE scans.
+- Materialization.
+- Estimated rows.
+- Actual rows.
+- Execution timing.
+- Buffer usage.
+
+A physical plan shows what PostgreSQL actually did, while the logical operation explorer shows what the SQL means.
+
+Do not infer actual timings from SQL source code.
+
+Use a controlled, read-only environment with strict limits if database connectivity is implemented. Never expose database credentials to the frontend.
+
+---
+
+## 9. SQL Performance Education
+
+Add an intelligent Performance Insights panel.
+
+Explain potential issues such as:
+
+- Missing or unsuitable indexes.
+- Large sequential scans.
+- Expensive sorts.
+- High-cardinality GROUP BY operations.
+- Large intermediate CTE results.
+- Repeated scans.
+- Unnecessary materialization.
+- Large joins.
+- OFFSET pagination inefficiency.
+- Expensive window functions.
+- Early filtering opportunities.
+
+For each observation show:
+
+1. What was detected.
+2. Why it might be expensive.
+3. When it becomes a real problem.
+4. How to investigate it.
+5. Potential improvement.
+
+Separate static optimization hypotheses from findings supported by an actual execution plan.
+
+Do not automatically label a sequential scan as bad.
+
+Do not fabricate query costs or execution times.
+
+---
+
+## 10. AI-Powered Explanation Engine
+
+Create an AI explanation layer that converts structured SQL analysis into clear, educational explanations.
+
+The AI should receive:
+
+- Parsed SQL AST information.
+- CTE relationships.
+- Operation metadata.
+- Known schemas.
+- Actual or simulated results when available.
+- Relevant SQL fragments.
+
+The AI must not independently invent SQL execution behavior.
+
+The deterministic SQL analysis engine is the source of truth.
+
+The AI explains the analysis to the user.
+
+Support explanations in:
+
+- English
+- Arabic, with natural Egyptian Arabic as the default learning style
+
+Examples of explanation styles:
+
+**Simple:** Explain the operation like I am a beginner.
+
+**Detailed:** Explain the SQL semantics, NULL behavior, edge cases, and intermediate transformations.
+
+**Backend Engineer:** Explain the operation with practical application and database performance considerations.
+
+Add an "Ask about this step" feature so the user can ask:
+
+- Why was this row excluded?
+- Why did DISTINCT ON select this record?
+- Why are there NULL values after this LEFT JOIN?
+- What happens if two records have identical timestamps?
+- Why is this CTE MATERIALIZED?
+- Could this JOIN create duplicate rows?
+- What changes if the table has one million rows?
+
+The explanation must be grounded in the parsed query and available data.
+
+AI integration should be optional and configurable. Core parsing and visualization must work without an AI API key.
+
+---
+
+## 11. Professional UI and UX
+
+The interface must look like a polished developer tool, not a generic AI-generated dashboard.
+
+Design direction:
+
+- Dark mode first.
+- Inspired by professional SQL IDEs, database debugging tools, and modern developer platforms.
+- Clean typography.
+- Excellent code readability.
+- Subtle borders.
+- Smooth interactions.
+- Clear visual hierarchy.
+- Responsive split panels.
+- Resizable editor and inspector.
+- Minimal visual clutter.
+- Consistent spacing.
+
+Use distinct visual representations for:
+
+- Source tables
+- Filters
+- Joins
+- Aggregations
+- CTEs
+- Sorting
+- Calculated fields
+- Final results
+
+Add synchronized highlighting.
+
+When a user selects a node in the visualization, highlight the corresponding SQL code in Monaco.
+
+When a user selects an SQL expression, highlight its related visualization node where the mapping is available.
+
+Provide a full-screen visualization mode.
+
+---
+
+## 12. Realistic PostgreSQL Example
+
+The project must support a realistic GPS reporting query.
+
+Assume a source table:
+
+`reporting_vehicle_gps_track_batches`
+
+With columns:
+
+- id
+- vehicleId
+- source
+- pointCount
+- windowStart
+- windowEnd
+- receivedAt
+- eventTime
+
+The query calculates GPS data quality and vehicle health.
+
+It includes CTEs named:
+
+- filtered
+- totals
+- latest_fix
+- latest_receipt
+- labeled
+- matched
+- statuses
+- sources
+
+It uses PostgreSQL features such as:
+
+- MATERIALIZED
+- DISTINCT ON
+- Aggregate FILTER
+- MAX
+- COUNT
+- SUM
+- EXTRACT(EPOCH FROM ...)
+- Timestamp subtraction
+- INNER JOIN
+- LEFT JOIN
+- CASE WHEN
+- JSONB_BUILD_OBJECT
+
+It also originates from a TypeScript template literal with dynamic JavaScript expressions and PostgreSQL positional parameters.
+
+Create a realistic demo query and seed data covering:
+
+- Vehicle with fresh GPS data.
+- Vehicle with stale GPS data.
+- Vehicle with clock anomalies.
+- Vehicle with no valid location evidence.
+- Multiple GPS batches from the same vehicle.
+- Different GPS data sources.
+- Repeated timestamps.
+- Batches that arrive late.
+
+Use this scenario as a primary end-to-end test of the visualization engine.
+
+Do not hardcode the application specifically for GPS queries. The core engine must remain generic.
+
+---
+
+## 13. Architecture Requirements
+
+Design the backend using separate modules:
+
+**Source Code Analyzer**\
+Parses JavaScript/TypeScript and identifies SQL construction.
+
+**SQL Reconstruction Engine**\
+Safely reconstructs query text and tracks unresolved expressions and parameters.
+
+**PostgreSQL Parser**\
+Produces a structured SQL AST.
+
+**Semantic Analyzer**\
+Builds the logical query representation and resolves references where schema information is available.
+
+**Data Lineage Engine**\
+Tracks relationships between tables, CTEs, and columns.
+
+**Logical Step Generator**\
+Produces a structured series of operations suitable for visualization.
+
+**Execution / Simulation Engine**\
+Runs supported queries against isolated sample data when available.
+
+**Execution Plan Analyzer**\
+Parses PostgreSQL EXPLAIN JSON and visualizes physical operations.
+
+**Explanation Engine**\
+Generates deterministic descriptions and optionally AI-enhanced explanations.
+
+**Visualization API**\
+Returns structured graph nodes, edges, operations, source code ranges, and intermediate-result metadata.
+
+Define strong TypeScript interfaces between these modules.
+
+Avoid creating a single massive parser or visualization component.
+
+---
+
+## 14. Accuracy, Security, and Limitations
+
+Correctness is more important than impressive animations.
+
+Requirements:
+
+- Never execute arbitrary user-submitted JavaScript.
+- Never treat unresolved JavaScript expressions as valid SQL.
+- Never pretend illustrative results are actual results.
+- Never claim to know physical execution order from SQL text alone.
+- Respect PostgreSQL NULL and three-valued boolean semantics.
+- Handle SQL identifiers, aliases, quoted names, and case sensitivity.
+- Preserve source mappings where practical.
+- Handle malformed and incomplete queries gracefully.
+- Clearly expose unsupported syntax.
+- Keep large result sets bounded and paginated.
+- Prevent untrusted queries from modifying databases.
+- Enforce resource, row-count, and execution-time limits.
+- Avoid sending pasted source code to external AI services without explicit user action.
+- Prefer local processing for source-code analysis whenever feasible.
+
+The visualizer must reflect real SQL semantics, not a simplified interpretation that silently changes query behavior.
+
+---
+
+## 15. Testing Requirements
+
+Build meaningful tests for:
+
+- JavaScript template-literal extraction.
+- Dynamic query fragments.
+- Unresolved variables.
+- PostgreSQL parsing.
+- CTE dependency generation.
+- Column lineage.
+- Aggregate FILTER behavior.
+- DISTINCT ON ordering.
+- INNER JOIN and LEFT JOIN semantics.
+- NULL handling.
+- CASE WHEN.
+- Timestamp calculations.
+- Source-code-to-visual-node mappings.
+- Correct intermediate tables.
+- Error handling.
+
+Provide integration tests with real PostgreSQL behavior for supported execution features.
+
+Include at least three end-to-end demo queries:
+
+1. Simple users and posts query with JOIN and GROUP BY.
+2. Complex GPS vehicle reporting query with multiple CTEs.
+3. Analytics query with window functions and nested aggregations.
+
+---
+
+## 16. Development Process
+
+Build the real application, not just a design document.
+
+Work in these phases:
+
+**Phase 1 — Functional Foundation**
+
+- Create the project.
+- Implement the main workspace.
+- Integrate Monaco Editor.
+- Support raw PostgreSQL input.
+- Implement real SQL parsing.
+- Build automatic CTE dependency graphs.
+- Show basic explanations.
+
+**Phase 2 — JavaScript/TypeScript Understanding**
+
+- Implement AST-based source-code analysis.
+- Extract SQL template literals.
+- Resolve safe static expressions.
+- Provide manual parameter resolution.
+- Handle dynamic fragments transparently.
+
+**Phase 3 — Interactive SQL Debugger**
+
+- Build logical operation graphs.
+- Implement step navigation.
+- Display real intermediate tables for supported sample-data queries.
+- Add synchronized code highlighting.
+- Add before/after visual transformations.
+
+**Phase 4 — Advanced Features**
+
+- EXPLAIN visualization.
+- Performance insights.
+- Column lineage enhancements.
+- AI-powered educational explanations.
+- Import/export functionality.
+- UI polish.
+
+Prioritize a fully functional vertical slice over implementing many disconnected screens.
+
+The initial working version should let me paste a query, see its real parsed CTE dependency graph, click a CTE, inspect its SQL, and view a clear explanation.
+
+Then progressively add accurate intermediate-data visualization.
+
+---
+
+## 17. Deliverables
+
+I expect:
+
+1. A complete working application.
+2. A clean, maintainable project structure.
+3. Actual parsing and analysis logic.
+4. A responsive interactive interface.
+5. Demo SQL queries with realistic sample data.
+6. Tests for the query analysis engine.
+7. README with architecture and setup instructions.
+8. Local development commands.
+9. Docker Compose configuration for the optional PostgreSQL lab environment.
+10. A clear explanation of implemented features and current limitations.
+
+Do not stop after generating static UI mockups.
+
+Do not implement fake visualizations that only work with predefined queries.
+
+Do not use an LLM as a substitute for a real SQL parser.
+
+Do not claim support for features that have not been implemented.
+
+**Start by defining the architecture and the core data structures, then implement Phase 1 and demonstrate it working. Continue through the later phases as far as possible, running tests and fixing errors along the way.**
+
+The final product should feel like **Chrome DevTools for SQL queries**, combined with an interactive database learning platform.
+
+My ultimate goal is simple:
+
+**I want to paste complex real-world JavaScript or TypeScript code, understand the SQL it generates, visually follow every data transformation, inspect intermediate tables, and finally understand exactly how the query produces its result.**
+
+## نقطة هندسية مهمة قبل ما تبدأ
+
+أنا أنصحك تبني المشروع على 3 مستويات منفصلة، لأن ده اللي هيحدد إذا الموقع هيبقى مفيد فعلًا ولا مجرد AI بيرسم رسومات:
+
+1\. Code Understanding Engine
+
+يفهم JavaScript/TypeScript ويستخرج SQL الحقيقية، ويحدد الأجزاء الديناميكية الناقصة.
+
+2\. SQL Execution & Analysis Engine
+
+يفهم منطق SQL، ويحسب النتائج الوسيطة باستخدام بيانات فعلية أو تجريبية في بيئة آمنة.
+
+3\. Interactive Visualization Engine
+
+يحوّل التحليل لرسومات وجداول ومراحل تفاعلية، مع شرح كل خطوة.
+
+وأهم قرار في المشروع كله: ما تعتمدش على الـ AI علشان يفسّر SQL وينتج النتيجة من خياله. خلي الـ SQL Parser والـ Execution Engine مسؤولين عن الحقيقة، والـ AI مسؤول عن الشرح والتبسيط.
+
+بالطريقة دي الأداة مش هتشرحلك بس الكويري بتعمل إيه؛ هتقدر كمان تستخدمها كوسيلة حقيقية لفهم ومراجعة الكويريز المعقدة في شغلك.

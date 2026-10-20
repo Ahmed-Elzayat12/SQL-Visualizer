@@ -1,0 +1,8 @@
+{
+  "name": "QueryScope - Interactive SQL & TypeScript Query Visualizer",
+  "description": "Interactive SQL visualization, debugging, and data flow learning platform for backend engineers with AST analysis, step-by-step query execution, and CTE graphs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
