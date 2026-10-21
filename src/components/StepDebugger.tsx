@@ -56,9 +56,9 @@ export const StepDebugger: React.FC<StepDebuggerProps> = ({
   if (!currentStep) return null;
 
   return (
-    <div className="w-full bg-slate-900/95 border-t border-slate-800 p-3 flex flex-col md:flex-row items-center justify-between gap-3 shadow-2xl backdrop-blur-md">
+    <div className="w-full bg-slate-900/95 border-t border-slate-800 p-3 shrink-0 flex flex-wrap items-center justify-between gap-3 shadow-2xl backdrop-blur-md">
       {/* Left: Step Info & Metric */}
-      <div className="flex items-center gap-3 w-full md:w-auto overflow-hidden">
+      <div className="flex items-center gap-3 min-w-0 flex-1 basis-64 overflow-hidden">
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800/80 border border-slate-700/80 text-xs font-mono shrink-0">
           <span className="text-slate-400">Step</span>
           <span className="text-blue-400 font-bold tabular-nums">

@@ -1,13 +1,13 @@
 import React, { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { 
-  Database, 
-  Filter, 
-  Layers, 
-  GitMerge, 
-  ListFilter, 
-  Calculator, 
-  CheckCircle2, 
+import {
+  Database,
+  Filter,
+  Layers,
+  GitMerge,
+  ListFilter,
+  Calculator,
+  CheckCircle2,
   ArrowRight,
   Zap,
   Activity
@@ -29,14 +29,14 @@ export const CteNodeComponent = memo(({ data }: { data: NodeCustomData }) => {
   }
 
   return (
-    <div 
+    <div
       onClick={data.onClick}
       className={`min-w-[240px] max-w-[280px] rounded-lg border p-3.5 shadow-lg backdrop-blur-sm transition-all duration-200 cursor-pointer ${borderClass}`}
     >
-      <Handle 
-        type="target" 
-        position={Position.Left} 
-        className="!w-2.5 !h-2.5 !bg-blue-400 !border-2 !border-slate-900" 
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!w-2.5 !h-2.5 !bg-blue-400 !border-2 !border-slate-900"
       />
 
       <div className="flex items-start justify-between gap-2 mb-2">
@@ -66,14 +66,14 @@ export const CteNodeComponent = memo(({ data }: { data: NodeCustomData }) => {
       {data.stats && (
         <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
           <span>Rows Processed</span>
-          <span className="text-slate-200 tabular-nums font-semibold">{data.stats.rowsOut ?? 0}</span>
+          <span className="text-slate-200 tabular-nums font-semibold">{data.stats.rowsOut ?? '-'}</span>
         </div>
       )}
 
-      <Handle 
-        type="source" 
-        position={Position.Right} 
-        className="!w-2.5 !h-2.5 !bg-blue-400 !border-2 !border-slate-900" 
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!w-2.5 !h-2.5 !bg-blue-400 !border-2 !border-slate-900"
       />
     </div>
   );
@@ -125,14 +125,14 @@ export const OperationNodeComponent = memo(({ data }: { data: NodeCustomData }) 
   }
 
   return (
-    <div 
+    <div
       onClick={data.onClick}
       className={`min-w-[220px] max-w-[260px] rounded-lg border p-3 shadow-md backdrop-blur-sm transition-all duration-200 cursor-pointer ${borderClass}`}
     >
-      <Handle 
-        type="target" 
-        position={Position.Left} 
-        className="!w-2 !h-2 !bg-slate-400 !border !border-slate-900" 
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!w-2 !h-2 !bg-slate-400 !border !border-slate-900"
       />
 
       <div className="flex items-center gap-2 mb-1.5">
@@ -157,15 +157,15 @@ export const OperationNodeComponent = memo(({ data }: { data: NodeCustomData }) 
         <div className="mt-2 pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[10px] font-mono text-slate-400">
           <span>Row Delta</span>
           <span className="text-slate-200 tabular-nums">
-            {data.stats.rowsIn ?? 0} <ArrowRight className="w-2.5 h-2.5 inline mx-0.5 text-slate-500" /> {data.stats.rowsOut ?? 0}
+            {data.stats.rowsIn ?? '-'} <ArrowRight className="w-2.5 h-2.5 inline mx-0.5 text-slate-500" /> {data.stats.rowsOut ?? '-'}
           </span>
         </div>
       )}
 
-      <Handle 
-        type="source" 
-        position={Position.Right} 
-        className="!w-2 !h-2 !bg-slate-400 !border !border-slate-900" 
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!w-2 !h-2 !bg-slate-400 !border !border-slate-900"
       />
     </div>
   );
@@ -175,11 +175,11 @@ export const SourceTableNodeComponent = memo(({ data }: { data: NodeCustomData }
   const isSelected = data.isActive;
 
   return (
-    <div 
+    <div
       onClick={data.onClick}
-      className={`min-w-[230px] rounded-lg border p-3.5 shadow-lg backdrop-blur-sm cursor-pointer transition-all ${
-        isSelected 
-          ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-slate-900' 
+      className={`w-[280px] rounded-lg border p-3.5 shadow-lg backdrop-blur-sm cursor-pointer transition-all ${
+        isSelected
+          ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-slate-900'
           : 'border-slate-800 bg-slate-900/90 hover:border-slate-700'
       }`}
     >
@@ -187,23 +187,23 @@ export const SourceTableNodeComponent = memo(({ data }: { data: NodeCustomData }
         <div className="p-2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
           <Database className="w-4 h-4" />
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="text-[10px] text-emerald-400 font-mono uppercase tracking-wider">Source Table</div>
-          <div className="text-sm font-semibold text-slate-100 font-mono">{data.label}</div>
+          <div className="text-sm font-semibold text-slate-100 font-mono break-all">{data.label}</div>
         </div>
       </div>
 
       {data.stats && (
         <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
           <span>Physical Rows</span>
-          <span className="text-slate-200 tabular-nums font-semibold">{data.stats.rowsOut ?? 0}</span>
+          <span className="text-slate-200 tabular-nums font-semibold">{data.stats.rowsOut ?? '-'}</span>
         </div>
       )}
 
-      <Handle 
-        type="source" 
-        position={Position.Right} 
-        className="!w-2.5 !h-2.5 !bg-emerald-400 !border-2 !border-slate-900" 
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!w-2.5 !h-2.5 !bg-emerald-400 !border-2 !border-slate-900"
       />
     </div>
   );

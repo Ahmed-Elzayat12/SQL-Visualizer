@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { 
   Code2, 
@@ -10,9 +10,15 @@ import {
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
-import type { DynamicVariable } from '../types/ast';
+import { SIMPLE_EXAMPLES } from '../data/simpleExamples';
+import type { JsAnalysisResult, DynamicVariable } from '../types/ast';
 
 interface EditorPanelProps {
+  analysis: JsAnalysisResult;
+  analysisNotice?: string;
+  illustrativeInputs: boolean;
+  onToggleIllustrativeInputs: (value: boolean) => void;
+  onUseSql: () => void;
   code: string;
   language: 'typescript' | 'sql';
   onChangeCode: (newCode: string) => void;
@@ -27,6 +33,11 @@ interface EditorPanelProps {
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
+  analysis,
+  analysisNotice,
+  illustrativeInputs,
+  onToggleIllustrativeInputs,
+  onUseSql,
   code,
   language,
   onChangeCode,
@@ -40,6 +51,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   activeSnippet,
 }) => {
   const editorRef = useRef<any>(null);
+  const [showGeneratedSql, setShowGeneratedSql] = useState(false);
+  const showingGeneratedSql = useRef(showGeneratedSql);
+  // Monaco updates its model before React refreshes its change subscription.
+  showingGeneratedSql.current = showGeneratedSql;
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -73,22 +88,21 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       {/* Top Controls Bar */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-900/90 gap-2 flex-wrap">
         {/* Demo Selector */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <FolderOpen className="w-3.5 h-3.5 text-slate-400" />
           <select
             onChange={(e) => onLoadDemo(e.target.value)}
-            defaultValue="gps_ts"
-            className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+            value=""
+            aria-label="Load a simple example"
+            className="max-w-full min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
           >
-            <option value="gps_ts">Fleet GPS Telemetry (NestJS / TypeScript)</option>
-            <option value="gps_sql">Fleet GPS Telemetry (Raw SQL - 8 CTEs)</option>
-            <option value="ecommerce">E-Commerce Customer Lifetime Value (Window Functions)</option>
-            <option value="posts">Author &amp; Post Engagement (Aggregations &amp; Join)</option>
+            <option value="" disabled>Load a simple example</option>
+            {Object.entries(SIMPLE_EXAMPLES).map(([key, demo]) => <option key={key} value={key}>{demo.label}</option>)}
           </select>
         </div>
 
         {/* Language switch & Run button */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="flex items-center bg-slate-950 p-0.5 rounded border border-slate-800 text-[11px] font-mono">
             <button
               onClick={() => onChangeLanguage('typescript')}
@@ -124,7 +138,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       {/* Dynamic Variables Resolver Bar (if variables or params exist) */}
       {(variables.length > 0 || parametersCount > 0) && (
-        <div className="flex items-center justify-between px-3 py-1.5 bg-blue-950/30 border-b border-blue-900/40 text-xs text-blue-200">
+        <div className="flex items-center justify-between flex-wrap gap-2 px-3 py-1.5 bg-blue-950/30 border-b border-blue-900/40 text-xs text-blue-200">
           <div className="flex items-center gap-2 truncate">
             <Sliders className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <span className="truncate">
@@ -135,11 +149,11 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             {onAutoFill && (
               <button
                 onClick={onAutoFill}
-                title="Auto-fill dynamic parameters with realistic values"
+                title="Reuse known values for static expressions and parameters"
                 className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 flex items-center gap-1 transition-colors"
               >
                 <Sparkles className="w-3 h-3 text-blue-400" />
-                <span>Auto-Fill</span>
+                <span>Known values</span>
               </button>
             )}
             <button
@@ -152,17 +166,46 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         </div>
       )}
 
+      <div className="shrink-0 border-b border-slate-800 p-3 text-xs space-y-2 max-h-48 overflow-auto" aria-live="polite">
+        <p className="text-slate-400">Paste SQL or a TS function. Local expression helpers and CTE fragments are supported. For QueryBuilder, paste getQueryAndParameters() output.</p>
+        {language === 'typescript' && <label className="flex items-start gap-2 text-slate-300">
+          <input type="checkbox" checked={illustrativeInputs} onChange={event => onToggleIllustrativeInputs(event.target.checked)} />
+          Use illustrative values for missing predicate arrays
+        </label>}
+        {analysis.assumptions.length > 0 && <div className="rounded border border-amber-800 bg-amber-950/30 p-2 text-amber-200" data-testid="preview-assumptions">
+          <p className="font-semibold">Illustrative structure preview</p>
+          <ul className="list-disc pl-4 mt-1 space-y-1">{analysis.assumptions.map((assumption, i) => <li key={i}>{assumption}</li>)}</ul>
+          <button onClick={onOpenVariablesModal} className="mt-2 underline">Edit actual inputs</button>
+        </div>}
+        {analysisNotice && <p className="text-slate-400">{analysisNotice}</p>}
+        {analysis.syntaxErrors.map((error, i) => <p key={i} role="alert" className="text-amber-300 break-words">{error}</p>)}
+        {!analysis.isStructureReady && !analysis.syntaxErrors.length && <p className="text-amber-300">Resolve the missing template inputs to build the graph.</p>}
+        {analysis.isStructureReady && analysis.parameters.some(param => param.value === undefined) && <p className="text-slate-400">SQL parameters remain as placeholders. Values are optional for the structure graph.</p>}
+        {analysis.hasJsWrapper && analysis.extractedSql && <details>
+          <summary className="cursor-pointer text-blue-300">Extracted SQL - {analysis.isStructureReady ? 'Structure ready' : 'Needs inputs'}</summary>
+          <pre className="mt-2 whitespace-pre-wrap break-words text-slate-300 select-text">{analysis.extractedSql}</pre>
+          <button disabled={!analysis.isStructureReady} onClick={onUseSql} className="mt-2 rounded bg-blue-600 px-3 py-1 disabled:opacity-40">Use extracted SQL</button>
+        </details>}
+      </div>
       {/* Monaco Code Editor */}
-      <div className="flex-1 w-full h-full relative">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-800 text-xs" role="tablist" aria-label="Code view">
+        <button role="tab" aria-selected={!showGeneratedSql} onClick={() => setShowGeneratedSql(false)} className={!showGeneratedSql ? 'text-blue-300' : 'text-slate-400'}>Source</button>
+        <button role="tab" aria-selected={showGeneratedSql} disabled={!analysis.extractedSql} onClick={() => setShowGeneratedSql(true)} className={showGeneratedSql ? 'text-blue-300' : 'text-slate-400 disabled:opacity-40'}>Generated SQL</button>
+        {showGeneratedSql && <span className="text-[10px] text-slate-500">Read-only preview</span>}
+      </div>
+      <div className="flex-1 min-h-0 w-full relative">
         <Editor
           height="100%"
-          language={language}
-          value={code}
-          onChange={(val) => onChangeCode(val || '')}
+          path={showGeneratedSql ? 'queryscope-generated.sql' : 'queryscope-source.ts'}
+          language={showGeneratedSql ? 'sql' : language}
+          value={showGeneratedSql ? analysis.extractedSql : code}
+          onChange={(val) => { if (!showingGeneratedSql.current) onChangeCode(val || ''); }}
           onMount={handleEditorDidMount}
           theme="vs-dark"
           options={{
-            fontSize: 12.5,
+            automaticLayout: true,
+            readOnly: showGeneratedSql,
+            fontSize: 13,
             lineHeight: 20,
             fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, monospace",
             minimap: { enabled: false },

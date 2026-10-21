@@ -1,9 +1,11 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import {
   ReactFlow,
   Controls,
   Background,
-  MiniMap,
+  useReactFlow,
+  useStore,
+  useNodesInitialized,
   BackgroundVariant,
   type Node,
   type Edge,
@@ -13,7 +15,21 @@ import { CteNodeComponent, OperationNodeComponent, SourceTableNodeComponent } fr
 import type { ParsedSqlQuery } from '../types/sql';
 import type { StepExecutionResult } from '../types/execution';
 import type { GraphViewMode } from '../types/visualizer';
-import { Layers, GitFork, Network, Maximize2 } from 'lucide-react';
+import { Layers, GitFork } from 'lucide-react';
+
+// React Flow observes its container; refit after a panel resize settles.
+function FitGraphToContainer() {
+  const { fitView } = useReactFlow();
+  const width = useStore(state => state.width);
+  const height = useStore(state => state.height);
+  const ready = useNodesInitialized();
+  useEffect(() => {
+    if (!ready || !width || !height) return;
+    const timer = window.setTimeout(() => { void fitView({ padding: 0.15, maxZoom: 1 }); }, 120);
+    return () => window.clearTimeout(timer);
+  }, [fitView, width, height, ready]);
+  return null;
+}
 
 const nodeTypes = {
   cteNode: CteNodeComponent,
@@ -65,12 +81,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
           isSourceTable: true,
           isActive: isSelected,
           stats: {
-            rowsOut: currentStep?.outputRows?.length || 8,
+            rowsOut: simulationSteps.find(step => step.operationId === parsedQuery.allOperations.find(op => op.type === 'SOURCE_SCAN' && op.inputs[0] === tbl)?.id)?.outputRows.length,
           },
           onClick: () => onSelectNode(`tbl_${tbl}`, tbl),
         },
       });
-      yOffset += 140;
+      xOffset += 320;
     });
 
     // Level calculation for CTE DAG
@@ -103,9 +119,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
     });
 
     levelBuckets.forEach((bucket, lvl) => {
-      const colX = 380 + (lvl - 1) * 340;
+      const colX = 60;
       bucket.forEach((cte, idx) => {
-        const rowY = 60 + idx * 160;
+        const rowY = 280 + (lvl - 1) * 220;
         const isCurrentActive = currentStep?.cteName?.toLowerCase() === cte.name.toLowerCase();
         const isSelected = selectedNodeId === `cte_${cte.name}` || isCurrentActive;
 
@@ -115,7 +131,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
         nodes.push({
           id: `cte_${cte.name}`,
           type: 'cteNode',
-          position: { x: colX, y: rowY },
+          position: { x: colX + idx * 320, y: rowY },
           data: {
             id: `cte_${cte.name}`,
             label: cte.name,
@@ -152,32 +168,32 @@ export const GraphView: React.FC<GraphViewProps> = ({
     });
 
     // Final output node
-    const maxLevel = Math.max(...Array.from(levels.values()), 1);
-    const finalX = 380 + maxLevel * 340;
+    const maxLevel = Math.max(...Array.from(levels.values()), 0);
+    const finalY = 280 + maxLevel * 220;
     const isFinalActive = currentStep?.operationId?.includes('final') || selectedNodeId === 'node_final';
 
     nodes.push({
       id: 'node_final',
       type: 'cteNode',
-      position: { x: finalX, y: 120 },
+      position: { x: 60, y: finalY },
       data: {
         id: 'node_final',
         label: 'Final Query Result',
         sublabel: 'PROJECTION',
         isCteNode: true,
         isActive: isFinalActive,
-        sqlSnippet: 'SELECT ... FROM labeled ORDER BY ...',
+        sqlSnippet: parsedQuery.finalQuery.operations.map(op => op.sqlSnippet).join('\n'),
         stats: {
-          rowsOut: currentStep?.outputRows?.length || 5,
+          rowsOut: simulationSteps.at(-1)?.outputRows.length,
         },
-        onClick: () => onSelectNode('node_final', 'final_output'),
+        onClick: () => onSelectNode('node_final', 'final_output', parsedQuery.finalQuery.operations.at(-1)?.id),
       },
     });
 
     parsedQuery.finalQuery.from.forEach((fromTbl) => {
       edges.push({
         id: `edge_final_${fromTbl}`,
-        source: `cte_${fromTbl}`,
+        source: sourceTableSet.has(fromTbl) ? `tbl_${fromTbl}` : `cte_${fromTbl}`,
         target: 'node_final',
         animated: isFinalActive,
         style: {
@@ -188,7 +204,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     });
 
     return { cteNodes: nodes, cteEdges: edges };
-  }, [parsedQuery, currentStep, selectedNodeId, onSelectNode]);
+  }, [parsedQuery, currentStep, selectedNodeId, onSelectNode, simulationSteps]);
 
   // 2. Build Detailed Logical Operations Graph
   const { opNodes, opEdges } = useMemo(() => {
@@ -197,7 +213,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
     let currentX = 60;
     let currentY = 100;
-    let prevOpId: string | null = null;
+    const lastOperationByCte = new Map(parsedQuery.ctes.map(cte => [cte.name.toLowerCase(), cte.operations.at(-1)?.id]));
 
     parsedQuery.allOperations.forEach((op, idx) => {
       const isCurrentActive = currentStep?.operationId === op.id;
@@ -222,10 +238,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
         },
       });
 
-      if (prevOpId) {
+      const predecessors = op.type === 'SOURCE_SCAN'
+        ? op.inputs.flatMap(input => lastOperationByCte.get(input.toLowerCase()) ?? [])
+        : op.inputOperationIds ?? (idx ? [parsedQuery.allOperations[idx - 1].id] : []);
+      for (const predecessor of predecessors) {
         edges.push({
-          id: `edge_op_${prevOpId}_${op.id}`,
-          source: prevOpId,
+          id: `edge_op_${predecessor}_${op.id}`,
+          source: predecessor,
           target: op.id,
           animated: isSelected,
           style: {
@@ -235,7 +254,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
         });
       }
 
-      prevOpId = op.id;
       currentX += 300;
       if (idx > 0 && idx % 4 === 0) {
         currentX = 60;
@@ -244,16 +262,18 @@ export const GraphView: React.FC<GraphViewProps> = ({
     });
 
     return { opNodes: nodes, opEdges: edges };
-  }, [parsedQuery.allOperations, currentStep, selectedNodeId, simulationSteps, onSelectNode]);
+  }, [parsedQuery, currentStep, selectedNodeId, simulationSteps, onSelectNode]);
 
   // Active nodes & edges based on mode
   const currentNodes = currentGraphView === 'CTE_DEPENDENCY' ? cteNodes : opNodes;
   const currentEdges = currentGraphView === 'CTE_DEPENDENCY' ? cteEdges : opEdges;
 
+  if (!parsedQuery.rawSql.trim()) return <div className="h-full flex items-center justify-center p-8 text-center text-sm text-slate-400">Paste SQL or resolve the input messages to see the query graph.</div>;
+
   return (
     <div className="relative w-full h-full bg-slate-950 flex flex-col overflow-hidden">
       {/* View Switcher Top Bar */}
-      <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 p-1 rounded-lg bg-slate-900/90 border border-slate-800 shadow-md backdrop-blur-md">
+      <div className="shrink-0 flex flex-wrap items-center gap-1.5 p-2 bg-slate-900 border-b border-slate-800">
         <button
           onClick={() => onToggleViewMode('CTE_DEPENDENCY')}
           className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -263,7 +283,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>CTE Dependency View</span>
+          <span>Dependencies</span>
         </button>
 
         <button
@@ -275,32 +295,25 @@ export const GraphView: React.FC<GraphViewProps> = ({
           }`}
         >
           <GitFork className="w-3.5 h-3.5" />
-          <span>Relational Operations View</span>
+          <span>Operations</span>
         </button>
       </div>
 
-      {/* Legend Indicator */}
-      <div className="absolute top-3 right-3 z-10 hidden lg:flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800/80 text-[11px] text-slate-400 backdrop-blur-md">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-          <span>Source Table</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-          <span>CTE Materialization</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-          <span>Active Step</span>
-        </div>
+      <div className="shrink-0 flex flex-wrap gap-3 px-3 py-2 text-[11px] text-slate-400 border-b border-slate-800">
+        <span className="text-emerald-400">Source table</span><span className="text-blue-400">Query / CTE</span>
+        <span>{parsedQuery.ctes.length} CTEs / {parsedQuery.sourceTables.length} source tables</span>
+        {!simulationSteps.length && <span className="text-amber-300">Structure preview / No row results</span>}
+        {parsedQuery.allOperations.some(operation => operation.type === 'UNION_ALL') && <span>UNION ALL</span>}
+        {parsedQuery.allOperations.some(operation => operation.type === 'LATERAL_JOIN') && <span>LATERAL</span>}
       </div>
-
+      <div className="flex-1 min-h-0 relative">
       <ReactFlow
+        key={`${currentGraphView}:${parsedQuery.rawSql}`}
         nodes={currentNodes}
         edges={currentEdges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         minZoom={0.2}
         maxZoom={1.5}
         defaultEdgeOptions={{ type: 'smoothstep' }}
@@ -308,16 +321,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
       >
         <Background color="#1e293b" gap={20} size={1} variant={BackgroundVariant.Dots} />
         <Controls className="!bg-slate-900 !border-slate-800 !rounded-lg !shadow-lg [&>button]:!border-slate-800 [&>button]:!bg-slate-900 [&>button]:!text-slate-300 hover:[&>button]:!bg-slate-800" />
-        <MiniMap
-          nodeColor={(node) => {
-            if (node.type === 'sourceTableNode') return '#10b981';
-            if (node.data?.isActive) return '#3b82f6';
-            return '#334155';
-          }}
-          maskColor="rgba(2, 6, 23, 0.7)"
-          className="!bg-slate-900/90 !border-slate-800 !rounded-lg !shadow-lg"
-        />
+        <FitGraphToContainer />
       </ReactFlow>
+      </div>
     </div>
   );
 };

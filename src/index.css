@@ -22,3 +22,46 @@
     background: #475569;
   }
 }
+
+html, body, #root { margin: 0; width: 100%; min-width: 320px; height: 100%; }
+button, select, summary { cursor: pointer; }
+button:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+.workspace { height: 100%; min-height: 0; }
+.workspace-panels {
+  display: grid;
+  grid-template-columns: var(--editor-width) var(--left-handle) minmax(0, 1fr) var(--right-handle) var(--inspector-width);
+  flex: 1; min-height: 0;
+}
+.workspace-panels > * { min-width: 0; }
+.workspace-editor { grid-column: 1; }
+.workspace-resizer-left { grid-column: 2; }
+.workspace-graph { grid-column: 3; }
+.workspace-resizer-right { grid-column: 4; }
+.workspace-inspector { grid-column: 5; }
+.workspace-panels > [hidden] { display: none; }
+.workspace-toolbar button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid #334155; border-radius: 6px; color: #cbd5e1; }
+.workspace-toolbar button:hover { background: #1e293b; color: white; }
+.workspace-resizer { display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; background: #0f172a; border-inline: 1px solid #1e293b; }
+.workspace-resizer span { width: 2px; height: 32px; border-radius: 2px; background: #475569; }
+.workspace-resizer:hover, .workspace-resizer:focus-visible { background: #1e40af; outline: none; }
+.workspace-resizer:focus-visible span { background: white; }
+.workspace-panels.is-resizing { cursor: col-resize; user-select: none; }
+.workspace-panels.is-resizing > :not(.workspace-resizer) { pointer-events: none; }
+@media (max-width: 1199px) {
+  .workspace { height: auto; min-height: 100%; }
+  .workspace-panels { flex: none; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr); }
+  .workspace-editor { grid-column: 1; }
+  .workspace-graph { grid-column: 2; }
+  .workspace-editor, .workspace-graph { height: 650px; }
+  .workspace-inspector { grid-column: 1 / -1; max-height: 650px; min-height: 360px; }
+  .workspace-resizer, .workspace-resize-hint { display: none; }
+  .workspace-panels.editor-hidden { grid-template-columns: minmax(0, 1fr); }
+  .workspace-panels.editor-hidden .workspace-graph { grid-column: 1; }
+  .header-nav { order: 3; width: 100%; }
+}
+@media (max-width: 639px) {
+  .workspace-panels { grid-template-columns: minmax(0, 1fr); }
+  .workspace-editor, .workspace-graph { grid-column: 1; }
+  .workspace-editor { height: 620px; }
+  .workspace-graph { height: 460px; }
+}

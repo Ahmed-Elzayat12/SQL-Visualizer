@@ -1,98 +1,16 @@
-import React from 'react';
-import { Database, Server, Cpu, Layers, GitBranch, Terminal, ShieldAlert } from 'lucide-react';
-
-export const DocsView: React.FC = () => {
-  return (
-    <div className="w-full h-full flex flex-col bg-slate-950 text-slate-200 overflow-y-auto p-6 max-w-5xl mx-auto space-y-8">
-      {/* Overview */}
-      <div className="space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight text-white font-sans">
-          QueryScope Architecture &amp; Engineering Constitution
-        </h1>
-        <p className="text-sm text-slate-400 leading-relaxed">
-          QueryScope is an interactive SQL and TypeScript debugger and learning platform for backend engineers.
-          Rather than relying on hallucinating LLMs for query execution, it is built on a 3-tier deterministic engine:
-        </p>
-      </div>
-
-      {/* 3 Pillars */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-          <div className="p-2 w-fit rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-            <Cpu className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-semibold text-white">1. Code Understanding</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Uses the TypeScript Compiler API AST parser to identify SQL template strings, resolve deterministic local constants, and isolate dynamic variables ($1, array joins) for user calibration.
-          </p>
-        </div>
-
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-          <div className="p-2 w-fit rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <Database className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-semibold text-white">2. SQL &amp; Execution Engine</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Parses PostgreSQL CTE dependencies, logical operators (WHERE, GROUP BY, DISTINCT ON, JOIN), and executes them in an in-memory relational sandbox to compute real intermediate tables.
-          </p>
-        </div>
-
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-          <div className="p-2 w-fit rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
-            <Layers className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-semibold text-white">3. Interactive Visualizer</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Renders an interactive DAG via React Flow with synchronized Monaco Editor code highlights, step-by-step debugger playback, before/after table diffs, and bilingual explanations in English and Egyptian Arabic.
-          </p>
-        </div>
-      </div>
-
-      {/* Docker Compose Section */}
-      <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-emerald-400" />
-          <h2 className="text-sm font-semibold text-white">
-            Optional Local PostgreSQL Lab Environment (Docker Compose)
-          </h2>
-        </div>
-        <p className="text-xs text-slate-400">
-          To run a dedicated, isolated PostgreSQL 17 lab with seeded telemetry tables locally:
-        </p>
-
-        <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto">
-{`# docker-compose.yml
-version: '3.8'
-
-services:
-  queryscope-postgres:
-    image: postgres:17-alpine
-    container_name: queryscope-pg-lab
-    environment:
-      POSTGRES_USER: queryscope
-      POSTGRES_PASSWORD: secretpassword
-      POSTGRES_DB: queryscope_telemetry
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
-
-volumes:
-  pgdata:`}
-        </pre>
-      </div>
-
-      {/* Security & Isolation */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-2 text-xs text-slate-400">
-        <div className="flex items-center gap-2 text-amber-400 font-semibold">
-          <ShieldAlert className="w-4 h-4" />
-          <span>Security &amp; Sandboxing Guarantee</span>
-        </div>
-        <p>
-          QueryScope never calls `eval()` or unconstrained execution on pasted JavaScript or TypeScript. Dynamic template expressions are parsed via AST tokenization. All query transformations are evaluated within a bounded in-memory relational sandbox.
-        </p>
-      </div>
-    </div>
-  );
-};
+export function DocsView() {
+  return <div className="h-full overflow-auto p-6 text-sm text-slate-300 space-y-5 max-w-3xl mx-auto">
+    <h1 className="text-xl font-bold text-white">Getting started</h1>
+    <p>Choose a simple example, then select a graph node or use the step controls to inspect the sample rows. The users table contains four people; age &gt;= 18 keeps three of them.</p>
+    <h2 className="font-semibold text-white">SQL or NestJS?</h2>
+    <p>SQL is the simplest input. For NestJS, paste one method containing a SQL string, template or .query(sql, params) call. Static constants and bind values can be resolved without running your code. Open Extracted SQL to review or use the result.</p>
+    <p>Runtime expressions need values in Resolve Variables. If several queries are found, paste one at a time. TypeORM QueryBuilder chains are not converted: use getQueryAndParameters() in your application and paste its SQL, then enter the bind values here.</p>
+    <h2 className="font-semibold text-white">Functions that return CTE fragments</h2>
+    <p>Paste the entire TS function, including its local helpers. Pure expression helpers, string-array joins, length checks and conditional expressions can be reconstructed. Standalone CTE fragments get a WITH prefix and a final SELECT from the last CTE for preview.</p>
+    <p>Illustrative inputs use [] for unknown scope predicate arrays and ["TRUE"] for other unknown predicate arrays. Every assumption is listed above the editor. Turn the option off for strict inputs, or enter actual JSON arrays in Resolve Variables. SQL bind parameters may remain as placeholders for structure analysis.</p>
+    <p>UNION ALL branches and correlated LATERAL subqueries appear in the graph. This structural preview does not produce database result rows or execute your TS code.</p>
+    <h2 className="font-semibold text-white">Sample simulation</h2>
+    <p>This is a limited learning simulator, not a PostgreSQL server. Simple comparisons, filters and sorting work on the sample tables. Unsupported filters display a message; Structure mode lets you inspect the query without simulating it. Estimated timings are illustrative. For database measurements, paste an actual EXPLAIN JSON plan into the EXPLAIN tab.</p>
+    <p>Pasted JavaScript is parsed with Babel and is never executed.</p>
+  </div>;
+}

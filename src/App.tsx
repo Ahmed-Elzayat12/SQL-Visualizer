@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { WorkspaceLayout } from './components/WorkspaceLayout';
 import { Header } from './components/Header';
 import { EditorPanel } from './components/EditorPanel';
 import { GraphView } from './components/GraphView';
@@ -9,25 +10,11 @@ import { ExplainView } from './components/ExplainView';
 import { SchemaViewer } from './components/SchemaViewer';
 import { DocsView } from './components/DocsView';
 
-import { analyzeSourceCode } from './engine/jsAnalyzer';
+import { analyzeSourceCode, detectSourceLanguage } from './engine/jsAnalyzer';
 import { parseSqlQuery } from './engine/sqlParser';
 import { simulateQueryExecution } from './engine/simulationEngine';
 
-import { 
-  GPS_TS_CODE, 
-  GPS_RAW_SQL, 
-  GPS_SAMPLE_DATA 
-} from './data/demoGpsQuery';
-import { 
-  ECOMMERCE_RAW_SQL, 
-  ECOMMERCE_SAMPLE_ORDERS, 
-  ECOMMERCE_SAMPLE_CUSTOMERS 
-} from './data/demoEcommerceQuery';
-import { 
-  POSTS_RAW_SQL, 
-  POSTS_SAMPLE_DATA, 
-  USERS_SAMPLE_DATA 
-} from './data/demoPostsQuery';
+import { SIMPLE_EXAMPLES, SIMPLE_TABLES } from './data/simpleExamples';
 
 import type { AppDataMode, GraphViewMode } from './types/visualizer';
 import type { DataRow } from './types/execution';
@@ -37,8 +24,9 @@ export function App() {
   const [activeTab, setActiveTab] = useState<'workspace' | 'schema' | 'explain' | 'docs'>('workspace');
 
   // Code & Language state
-  const [code, setCode] = useState<string>(GPS_TS_CODE);
-  const [language, setLanguage] = useState<'typescript' | 'sql'>('typescript');
+  const [code, setCode] = useState<string>(SIMPLE_EXAMPLES.filter.code);
+  const [language, setLanguage] = useState<'typescript' | 'sql'>('sql');
+  const [illustrativeInputs, setIllustrativeInputs] = useState(true);
 
   // View & Data Modes
   const [dataMode, setDataMode] = useState<AppDataMode>('SAMPLE_SIMULATION');
@@ -52,36 +40,35 @@ export function App() {
   const [userOverrides, setUserOverrides] = useState<Record<string, string>>({});
 
   // Selection & Step Debugger state
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>('cte_filtered');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
 
   // In-Memory Sample Datasets
-  const [sampleTables, setSampleTables] = useState<Record<string, DataRow[]>>({
-    reporting_vehicle_gps_track_batches: GPS_SAMPLE_DATA,
-    orders: ECOMMERCE_SAMPLE_ORDERS,
-    customers: ECOMMERCE_SAMPLE_CUSTOMERS,
-    posts: POSTS_SAMPLE_DATA,
-    users: USERS_SAMPLE_DATA,
-  });
+  const [sampleTables, setSampleTables] = useState<Record<string, DataRow[]>>(SIMPLE_TABLES);
 
   // 1. AST Analysis (Extract SQL from JS/TS)
   const jsAnalysis = useMemo(() => {
-    return analyzeSourceCode(code, userOverrides);
-  }, [code, userOverrides]);
+    return analyzeSourceCode(code, userOverrides, language, { illustrativeInputs });
+  }, [code, userOverrides, language, illustrativeInputs]);
 
   // 2. Parse SQL AST & CTEs
   const parsedQuery = useMemo(() => {
-    return parseSqlQuery(jsAnalysis.extractedSql);
-  }, [jsAnalysis.extractedSql]);
+    return parseSqlQuery(jsAnalysis.isStructureReady ? jsAnalysis.extractedSql : '');
+  }, [jsAnalysis.extractedSql, jsAnalysis.isStructureReady]);
 
   // 3. In-Memory Relational Simulation
-  const simulationSteps = useMemo(() => {
-    if (dataMode === 'STRUCTURE_ONLY') return [];
-    return simulateQueryExecution(parsedQuery, sampleTables);
-  }, [parsedQuery, sampleTables, dataMode]);
+  const simulation = useMemo(() => {
+    if (dataMode === 'STRUCTURE_ONLY' || !jsAnalysis.isFullyResolved) return { steps: [], error: '' };
+    if (parsedQuery.syntaxLimitations.length) return { steps: [], error: parsedQuery.syntaxLimitations.join(' ') };
+    const missing = parsedQuery.sourceTables.filter(table => !sampleTables[table]);
+    if (missing.length) return { steps: [], error: `Structure only: no sample rows are loaded for ${missing.join(', ')}.` };
+    try { return { steps: simulateQueryExecution(parsedQuery, sampleTables), error: '' }; }
+    catch (error) { return { steps: [], error: error instanceof Error ? error.message : 'Unable to simulate query.' }; }
+  }, [parsedQuery, sampleTables, dataMode, jsAnalysis.isFullyResolved]);
+  const simulationSteps = simulation.steps;
 
   // Active step & operation
   const activeStepResult = simulationSteps[currentStepIndex];
@@ -101,22 +88,12 @@ export function App() {
     setCurrentStepIndex(0);
     setIsPlaying(false);
 
-    if (demoKey === 'gps_ts') {
-      setCode(GPS_TS_CODE);
-      setLanguage('typescript');
-      setSelectedNodeId('cte_filtered');
-    } else if (demoKey === 'gps_sql') {
-      setCode(GPS_RAW_SQL);
-      setLanguage('sql');
-      setSelectedNodeId('cte_filtered');
-    } else if (demoKey === 'ecommerce') {
-      setCode(ECOMMERCE_RAW_SQL);
-      setLanguage('sql');
-      setSelectedNodeId('cte_customer_orders');
-    } else if (demoKey === 'posts') {
-      setCode(POSTS_RAW_SQL);
-      setLanguage('sql');
-      setSelectedNodeId('cte_published_posts');
+    const demo = SIMPLE_EXAMPLES[demoKey as keyof typeof SIMPLE_EXAMPLES];
+    if (demo) {
+      setCode(demo.code);
+      setLanguage(demo.language);
+      setSelectedNodeId(null);
+      setSelectedOperationId(null);
     }
   }, []);
 
@@ -131,7 +108,7 @@ export function App() {
     } else if (cteName) {
       // Find first operation in this CTE
       const firstOp = parsedQuery.allOperations.find(
-        o => o.cteName?.toLowerCase() === cteName.toLowerCase()
+        o => o.cteName?.toLowerCase() === cteName.toLowerCase() || (o.type === 'SOURCE_SCAN' && o.inputs[0]?.toLowerCase() === cteName.toLowerCase())
       );
       if (firstOp) {
         setSelectedOperationId(firstOp.id);
@@ -147,9 +124,9 @@ export function App() {
     const step = simulationSteps[idx];
     if (step) {
       setSelectedOperationId(step.operationId);
-      setSelectedNodeId(step.cteName ? `cte_${step.cteName}` : step.operationId);
+      setSelectedNodeId(graphViewMode === 'LOGICAL_OPERATIONS' ? step.operationId : step.cteName === 'final_output' ? 'node_final' : step.cteName ? `cte_${step.cteName}` : step.operationId);
     }
-  }, [simulationSteps]);
+  }, [simulationSteps, graphViewMode]);
 
   // Export report
   const handleExportReport = useCallback(() => {
@@ -207,42 +184,46 @@ export function App() {
   }, [jsAnalysis.variables, jsAnalysis.parameters]);
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans select-none">
+    <div className="flex flex-col w-full h-dvh bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Top Header */}
       <Header
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         dataMode={dataMode}
         onChangeDataMode={setDataMode}
-        onRunAnalysis={() => {}}
+        onRunAnalysis={() => { setCurrentStepIndex(0); setSelectedOperationId(null); setIsPlaying(false); }}
         onExportReport={handleExportReport}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 min-h-0 overflow-auto relative">
         {activeTab === 'workspace' && (
-          <div className="w-full h-full flex flex-col">
-            {/* 3-Panel Split Workspace */}
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
-              {/* Left Panel: Monaco Editor & Variables (4 cols) */}
-              <div className="md:col-span-4 h-full overflow-hidden">
+          <div className="workspace flex flex-col">
+            <WorkspaceLayout
+              editor={
                 <EditorPanel
                   code={code}
                   language={language}
-                  onChangeCode={setCode}
+                  onChangeCode={(value) => {
+                    setLanguage(detectSourceLanguage(value, language));
+                    setCode(value); setCurrentStepIndex(0); setSelectedOperationId(null); setIsPlaying(false); setUserOverrides({});
+                  }}
                   onChangeLanguage={setLanguage}
-                  onRunAnalysis={() => {}}
+                  onRunAnalysis={() => { setCurrentStepIndex(0); setSelectedOperationId(null); setIsPlaying(false); }}
                   onLoadDemo={handleLoadDemo}
                   variables={jsAnalysis.variables}
                   parametersCount={jsAnalysis.parameters.length}
                   onOpenVariablesModal={() => setShowVariablesModal(true)}
                   onAutoFill={handleAutoFillParams}
                   activeSnippet={activeOperation?.sqlSnippet}
+                  analysis={{ ...jsAnalysis, syntaxErrors: [...jsAnalysis.syntaxErrors, ...parsedQuery.parseErrors] }}
+                  analysisNotice={simulation.error || parsedQuery.syntaxLimitations.join(' ')}
+                  illustrativeInputs={illustrativeInputs}
+                  onToggleIllustrativeInputs={setIllustrativeInputs}
+                  onUseSql={() => { setCode(jsAnalysis.extractedSql); setLanguage('sql'); setUserOverrides(previous => Object.fromEntries(Object.entries(previous).filter(([key]) => /^\$\d+$/.test(key)))); }}
                 />
-              </div>
-
-              {/* Center Panel: React Flow Graph (5 cols) */}
-              <div className="md:col-span-5 h-full relative overflow-hidden border-r border-slate-800">
+              }
+              graph={
                 <GraphView
                   parsedQuery={parsedQuery}
                   simulationSteps={simulationSteps}
@@ -252,10 +233,8 @@ export function App() {
                   selectedNodeId={selectedNodeId}
                   onToggleViewMode={setGraphViewMode}
                 />
-              </div>
-
-              {/* Right Panel: Operation Inspector & Before/After Table Diff (3 cols) */}
-              <div className="md:col-span-3 h-full overflow-hidden">
+              }
+              inspector={
                 <InspectorPanel
                   operation={activeOperation}
                   stepResult={activeStepResult}
@@ -263,8 +242,8 @@ export function App() {
                   onToggleLang={setExplanationLang}
                   onAskAi={handleAskAi}
                 />
-              </div>
-            </div>
+              }
+            />
 
             {/* Bottom Floating Step Debugger */}
             {dataMode === 'SAMPLE_SIMULATION' && simulationSteps.length > 0 && (

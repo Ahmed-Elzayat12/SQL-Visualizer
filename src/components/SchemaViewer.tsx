@@ -12,7 +12,7 @@ export const SchemaViewer: React.FC<SchemaViewerProps> = ({
   onUpdateTableData,
 }) => {
   const tableNames = Object.keys(sampleTables);
-  const [activeTable, setActiveTable] = useState<string>(tableNames[0] || 'reporting_vehicle_gps_track_batches');
+  const [activeTable, setActiveTable] = useState<string>(tableNames[0] || 'users');
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
 
@@ -33,7 +33,7 @@ export const SchemaViewer: React.FC<SchemaViewerProps> = ({
   return (
     <div className="w-full h-full flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
+      <div className="flex flex-wrap gap-3 items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Database className="w-4 h-4 text-blue-400" />
           <h2 className="text-sm font-semibold text-slate-100">
@@ -58,7 +58,7 @@ export const SchemaViewer: React.FC<SchemaViewerProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 overflow-auto">
         {/* Table Selector Sidebar */}
         <div className="md:col-span-3 border-r border-slate-800 bg-slate-950 p-3 space-y-1 overflow-y-auto">
           <div className="text-[11px] font-mono uppercase text-slate-500 px-2 py-1 tracking-wider">
@@ -86,7 +86,7 @@ export const SchemaViewer: React.FC<SchemaViewerProps> = ({
         </div>
 
         {/* Table Rows Data Grid */}
-        <div className="md:col-span-9 flex flex-col overflow-hidden p-4">
+        <div className="md:col-span-9 min-w-0 flex flex-col overflow-auto p-4">
           <div className="flex items-center justify-between mb-3 text-xs font-mono">
             <span className="text-slate-400">
               Showing <span className="text-slate-100 font-bold">{currentRows.length}</span> sample rows for table &apos;{activeTable}&apos;

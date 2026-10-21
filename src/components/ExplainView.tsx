@@ -39,7 +39,7 @@ export const ExplainView: React.FC = () => {
   return (
     <div className="w-full h-full flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
+      <div className="flex flex-wrap gap-3 items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-emerald-400" />
           <h2 className="text-sm font-semibold text-slate-100">
@@ -68,7 +68,7 @@ export const ExplainView: React.FC = () => {
       </div>
 
       {/* Main Split Grid */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-auto">
         {/* Left: Input Textarea */}
         <div className="lg:col-span-4 border-r border-slate-800 flex flex-col bg-slate-950 p-3">
           <div className="text-xs font-mono text-slate-400 mb-2 flex items-center justify-between">

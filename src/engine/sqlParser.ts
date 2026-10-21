@@ -1,3 +1,4 @@
+import { tokenizeSql, isKeyword, relationAfter, sourceRelations } from './sqlTokens';
 import type {
   CteNode,
   LogicalOperation,
@@ -13,7 +14,7 @@ import type {
  * DISTINCT ON, aggregate FILTERs, and tracks column lineages.
  */
 export function parseSqlQuery(rawSql: string): ParsedSqlQuery {
-  const cleanSql = rawSql.trim();
+  const cleanSql = rawSql.slice(tokenizeSql(rawSql)[0]?.start ?? 0).trim();
   const ctes: CteNode[] = [];
   const sourceTables = new Set<string>();
   const allOperations: LogicalOperation[] = [];
@@ -23,17 +24,16 @@ export function parseSqlQuery(rawSql: string): ParsedSqlQuery {
 
   try {
     // 1. Detect CTEs (Common Table Expressions)
-    const withMatch = cleanSql.match(/^WITH\s+(RECURSIVE\s+)?([\s\S]+?)\s+SELECT\b/i);
-
     let finalSelectSql = cleanSql;
     let cteDefinitionsString = '';
-
+    const withMatch = cleanSql.match(/^WITH\s+(?:RECURSIVE\s+)?/i);
     if (withMatch) {
-      cteDefinitionsString = withMatch[2];
-      // Final query starts where WITH definition ends
-      const mainSelectIndex = cleanSql.lastIndexOf('SELECT');
-      if (mainSelectIndex !== -1) {
-        finalSelectSql = cleanSql.slice(mainSelectIndex);
+      const mainSelect = tokenizeSql(cleanSql).find(token => token.depth === 0 && isKeyword(token, 'SELECT'));
+      if (mainSelect) {
+        cteDefinitionsString = cleanSql.slice(withMatch[0].length, mainSelect.start).trim();
+        finalSelectSql = cleanSql.slice(mainSelect.start);
+      } else {
+        parseErrors.push('WITH contains no final SELECT. Add a final SELECT or paste a CTE fragment for automatic completion.');
       }
     }
 
@@ -70,6 +70,10 @@ export function parseSqlQuery(rawSql: string): ParsedSqlQuery {
         sourceTables.add(dep);
       }
     }
+
+    const tokens = tokenizeSql(cleanSql);
+    if (tokens.some(token => isKeyword(token, 'UNION'))) syntaxLimitations.push('UNION branches are shown structurally; sample row execution is not supported.');
+    if (tokens.some(token => isKeyword(token, 'LATERAL'))) syntaxLimitations.push('LATERAL subqueries are shown structurally; sample row execution is not supported.');
 
     // 3. Compute Column Lineage
     buildColumnLineage(ctes, finalOps.outputColumns, columnLineage);
@@ -113,75 +117,21 @@ export function parseSqlQuery(rawSql: string): ParsedSqlQuery {
  */
 function splitCteDefinitions(withClauseText: string): { name: string; body: string; isMaterialized?: boolean }[] {
   const results: { name: string; body: string; isMaterialized?: boolean }[] = [];
-  let depth = 0;
-  let inString = false;
-  let currentHeader = '';
-  let currentBody = '';
-  let inBody = false;
-
-  let i = 0;
-  while (i < withClauseText.length) {
-    const char = withClauseText[i];
-
-    if (char === "'" && withClauseText[i - 1] !== '\\') {
-      inString = !inString;
-    }
-
-    if (!inString) {
-      if (!inBody) {
-        if (char === '(') {
-          // Check if previous characters had 'AS' or 'AS MATERIALIZED'
-          const asMatch = currentHeader.match(/(\w+)\s+AS(?:\s+(MATERIALIZED|NOT\s+MATERIALIZED))?\s*$/i);
-          if (asMatch) {
-            inBody = true;
-            depth = 1;
-            i++;
-            continue;
-          }
-        }
-        currentHeader += char;
-      } else {
-        if (char === '(') {
-          depth++;
-        } else if (char === ')') {
-          depth--;
-          if (depth === 0) {
-            // End of this CTE body!
-            const headerMatch = currentHeader.match(/(\w+)\s+AS(?:\s+(MATERIALIZED|NOT\s+MATERIALIZED))?\s*$/i);
-            const cteName = headerMatch ? headerMatch[1].trim() : `cte_${results.length + 1}`;
-            const isMat = headerMatch && headerMatch[2] ? headerMatch[2].toUpperCase().includes('MATERIALIZED') && !headerMatch[2].toUpperCase().includes('NOT') : undefined;
-
-            results.push({
-              name: cteName,
-              body: currentBody.trim(),
-              isMaterialized: isMat,
-            });
-
-            currentHeader = '';
-            currentBody = '';
-            inBody = false;
-
-            // Skip trailing commas
-            while (i + 1 < withClauseText.length && (withClauseText[i + 1] === ',' || /\s/.test(withClauseText[i + 1]))) {
-              i++;
-            }
-            i++;
-            continue;
-          }
-        }
-        currentBody += char;
-      }
-    } else {
-      if (inBody) {
-        currentBody += char;
-      } else {
-        currentHeader += char;
-      }
-    }
-
-    i++;
+  const tokens = tokenizeSql(withClauseText);
+  let headerStart = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.value !== '(' || token.depth !== 0) continue;
+    const header = withClauseText.slice(headerStart, token.start).trim().replace(/^,\s*/, '');
+    const match = header.match(/^([a-zA-Z_][a-zA-Z0-9_]*|"[^"]+")\s+AS(?:\s+(MATERIALIZED|NOT\s+MATERIALIZED))?$/i);
+    if (!match) continue;
+    const closeIndex = tokens.findIndex((candidate, index) => index > i && candidate.value === ')' && candidate.depth === 0);
+    if (closeIndex < 0) break;
+    const close = tokens[closeIndex];
+    results.push({ name: match[1].replace(/^"|"$/g, ''), body: withClauseText.slice(token.end, close.start).trim(), isMaterialized: match[2] ? match[2].toUpperCase() === 'MATERIALIZED' : undefined });
+    headerStart = close.end;
+    i = closeIndex;
   }
-
   return results;
 }
 
@@ -221,58 +171,68 @@ function analyzeQueryOperations(
   outputColumns: SqlColumn[];
 } {
   const operations: LogicalOperation[] = [];
-  const dependencies: string[] = [];
-
-  // Extract FROM clause
-  const fromMatch = sqlText.match(/FROM\s+([a-zA-Z0-9_"]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_"]+))?/i);
-  const primaryTable = fromMatch ? fromMatch[1].replace(/"/g, '') : '';
-  if (primaryTable) {
-    dependencies.push(primaryTable);
+  const tokens = tokenizeSql(sqlText);
+  const top = tokens.filter(token => token.depth === 0);
+  const unions = top.filter(token => isKeyword(token, 'UNION'));
+  if (unions.length) {
+    let begin = 0;
+    const branches: ReturnType<typeof analyzeQueryOperations>[] = [];
+    for (const [index, union] of unions.entries()) {
+      branches.push(analyzeQueryOperations(`${scopeName}_branch_${index + 1}`, sqlText.slice(begin, union.start), allCteNames));
+      const next = top[top.indexOf(union) + 1];
+      begin = next && isKeyword(next, 'ALL') ? next.end : union.end;
+    }
+    branches.push(analyzeQueryOperations(`${scopeName}_branch_${branches.length + 1}`, sqlText.slice(begin), allCteNames));
+    const dependencies = [...new Set(branches.flatMap(branch => branch.dependencies))];
+    const outputColumns = branches[0].outputColumns;
+    const all = unions.every(union => isKeyword(top[top.indexOf(union) + 1], 'ALL'));
+    return {
+      dependencies, outputColumns,
+      operations: [
+        ...branches.flatMap(branch => branch.operations.map(op => ({ ...op, cteName: scopeName }))),
+        { id: `${scopeName}_union`, cteName: scopeName, type: 'UNION_ALL', title: all ? 'UNION ALL: combine branches' : 'UNION: combine distinct rows',
+          titleAr: all ? 'دمج الفروع UNION ALL' : 'دمج الصفوف بدون تكرار UNION', sqlSnippet: all ? 'UNION ALL' : 'UNION',
+          descriptionEn: all ? 'Combines rows from separate SELECT branches, preserving duplicates.' : 'Combines rows from separate SELECT branches and removes duplicates.',
+          descriptionAr: all ? 'بيجمع صفوف الفروع مع الاحتفاظ بالتكرار.' : 'بيجمع صفوف الفروع وبيشيل التكرار.',
+          inputs: dependencies, inputOperationIds: branches.flatMap(branch => branch.operations.at(-1)?.id ?? []), outputColumns, performanceTips: [], sqlConceptNotes: [] },
+      ],
+    };
   }
-
-  // Extract JOIN clauses
-  const joinRegex = /(INNER\s+|LEFT\s+(?:OUTER\s+)?|RIGHT\s+(?:OUTER\s+)?|FULL\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([a-zA-Z0-9_"]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_"]+))?(?:\s+ON\s+([\s\S]*?)(?=(?:INNER|LEFT|RIGHT|FULL|CROSS|\bWHERE\b|\bGROUP\b|\bORDER\b|\bHAVING\b|\bLIMIT\b|$)))?/gi;
-  let joinMatch: RegExpExecArray | null;
+  const dependencies = sourceRelations(tokens);
+  const fromToken = top.find(token => isKeyword(token, 'FROM'));
+  const primaryTable = fromToken ? relationAfter(tokens, tokens.indexOf(fromToken)) ?? '' : '';
   const joins: SqlJoin[] = [];
-
-  while ((joinMatch = joinRegex.exec(sqlText)) !== null) {
-    const joinTypeRaw = (joinMatch[1] || 'INNER').trim().toUpperCase().replace(/\s+OUTER/, '');
-    const joinType = (['INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS'].includes(joinTypeRaw)
-      ? joinTypeRaw
-      : 'INNER') as SqlJoin['type'];
-    const joinedTable = joinMatch[2].replace(/"/g, '');
-    const alias = joinMatch[3] ? joinMatch[3].replace(/"/g, '') : undefined;
-    const onCondition = joinMatch[4] ? joinMatch[4].trim() : undefined;
-
-    dependencies.push(joinedTable);
-    joins.push({
-      type: joinType,
-      table: joinedTable,
-      alias,
-      onCondition,
-    });
+  const lateralSql: string[] = [];
+  const stopWords = ['WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'WINDOW', 'JOIN'];
+  for (let i = 0; i < top.length; i++) {
+    if (!isKeyword(top[i], 'JOIN')) continue;
+    const next = top[i + 1];
+    const typeRaw = top[i - 1]?.value.toUpperCase();
+    const type = (['LEFT', 'RIGHT', 'FULL', 'CROSS'].includes(typeRaw) ? typeRaw : 'INNER') as SqlJoin['type'];
+    const endToken = top.slice(i + 2).find(token => stopWords.some(word => isKeyword(token, word)));
+    if (next && isKeyword(next, 'LATERAL')) {
+      lateralSql.push(sqlText.slice(top[i].start, endToken?.start ?? sqlText.length).trim());
+      continue;
+    }
+    const table = relationAfter(tokens, tokens.indexOf(top[i]));
+    if (!table) continue;
+    const on = top.slice(i + 2).find(token => isKeyword(token, 'ON') && token.start < (endToken?.start ?? Infinity));
+    joins.push({ type, table, onCondition: on ? sqlText.slice(on.end, endToken?.start ?? sqlText.length).trim() : undefined });
   }
-
-  // Extract WHERE clause
-  const whereMatch = sqlText.match(/\bWHERE\s+([\s\S]*?)(?=\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|\bLIMIT\b|\bWINDOW\b|$)/i);
-  const whereCondition = whereMatch ? whereMatch[1].trim() : undefined;
-
-  // Extract DISTINCT or DISTINCT ON
+  const clause = (name: string, second?: string) => {
+    const index = top.findIndex((token, i) => isKeyword(token, name) && (!second || top[i + 1] && isKeyword(top[i + 1], second)));
+    if (index < 0) return undefined;
+    const first = top[index + (second ? 1 : 0)];
+    const end = top.slice(index + (second ? 2 : 1)).find(token => ['WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET', 'WINDOW'].some(word => isKeyword(token, word)));
+    return sqlText.slice(first.end, end?.start ?? sqlText.length).trim().replace(/;$/, '');
+  };
+  const whereCondition = clause('WHERE');
   const distinctOnMatch = sqlText.match(/SELECT\s+DISTINCT\s+ON\s*\(([\s\S]*?)\)/i);
   const distinctOnExpr = distinctOnMatch ? distinctOnMatch[1].trim() : undefined;
-  const isDistinct = !distinctOnExpr && /SELECT\s+DISTINCT\b/i.test(sqlText);
-
-  // Extract GROUP BY
-  const groupByMatch = sqlText.match(/\bGROUP\s+BY\s+([\s\S]*?)(?=\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|$)/i);
-  const groupByClause = groupByMatch ? groupByMatch[1].trim() : undefined;
-
-  // Extract ORDER BY
-  const orderByMatch = sqlText.match(/\bORDER\s+BY\s+([\s\S]*?)(?=\bLIMIT\b|\bOFFSET\b|$)/i);
-  const orderByClause = orderByMatch ? orderByMatch[1].trim() : undefined;
-
-  // Extract SELECT columns
-  const selectMatch = sqlText.match(/SELECT(?:\s+DISTINCT(?:\s+ON\s*\([\s\S]*?\))?)?\s+([\s\S]*?)\s+FROM\b/i);
-  const selectClause = selectMatch ? selectMatch[1].trim() : '*';
+  const groupByClause = clause('GROUP', 'BY');
+  const orderByClause = clause('ORDER', 'BY');
+  const selectToken = top.find(token => isKeyword(token, 'SELECT'));
+  const selectClause = selectToken && fromToken ? sqlText.slice(selectToken.end, fromToken.start).trim().replace(/^DISTINCT(?:\s+ON\s*\([^)]*\))?\s+/i, '') : '*';
   const outputColumns = parseSelectColumns(selectClause, primaryTable);
 
   // --- BUILD LOGICAL OPERATIONS IN EXECUTION ORDER ---
@@ -301,7 +261,7 @@ function analyzeQueryOperations(
           observation: isCteSource ? 'CTE In-Memory / Spooled Scan' : `Full relation scan on ${primaryTable}`,
           whyExpensive: 'Reading unindexed rows wastes I/O if only a few rows are needed.',
           investigation: `Check EXPLAIN to verify if an index scan or bitmap heap scan could be used.`,
-          recommendation: `Ensure filter columns (e.g. vehicleId, eventTime) have matching composite indexes.`,
+          recommendation: `Check whether indexes on the filter columns improve the actual query plan.`,
         },
       ],
       sqlConceptNotes: [
@@ -312,6 +272,14 @@ function analyzeQueryOperations(
       ],
     });
   }
+
+  lateralSql.forEach((snippet, index) => operations.push({
+    id: `${scopeName}_lateral_${index}`, cteName: scopeName, type: 'LATERAL_JOIN',
+    title: 'LATERAL: evaluate per-row subquery', titleAr: 'حساب القيم لكل صف LATERAL',
+    sqlSnippet: snippet, descriptionEn: 'Calculates values from a correlated subquery for each source row (for example, usable).',
+    descriptionAr: 'بيحسب قيم مرتبطة بأعمدة كل صف من المصدر، زي usable.',
+    inputs: [primaryTable], outputColumns: [], performanceTips: [], sqlConceptNotes: [],
+  }));
 
   // 2. WHERE Filter
   if (whereCondition) {
@@ -430,7 +398,7 @@ function analyzeQueryOperations(
           observation: 'Requires Sorting by DISTINCT ON expressions first',
           whyExpensive: 'PostgreSQL must sort all input rows before picking the first one.',
           investigation: 'Verify if ORDER BY starts with the DISTINCT ON columns.',
-          recommendation: 'Create a compound index: (vehicleId, eventTime DESC) to allow an Index Scan without sorting.',
+          recommendation: 'Consider a compound index matching the DISTINCT ON and ORDER BY columns.',
         },
       ],
       sqlConceptNotes: [
@@ -504,8 +472,16 @@ function analyzeQueryOperations(
     });
   }
 
+  if (primaryTable) operations.push({
+    id: `${scopeName}_output`, cteName: scopeName, type: 'FINAL_OUTPUT',
+    title: 'Select output columns', titleAr: '\u0627\u062e\u062a\u064a\u0627\u0631 \u0627\u0644\u0623\u0639\u0645\u062f\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629',
+    sqlSnippet: `SELECT ${selectClause}`, inputs: [primaryTable], outputColumns,
+    descriptionEn: 'Keeps the selected columns in the result.', descriptionAr: '\u0628\u064a\u062d\u062a\u0641\u0638 \u0628\u0627\u0644\u0623\u0639\u0645\u062f\u0629 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u0641\u064a \u0627\u0644\u0646\u062a\u064a\u062c\u0629.',
+    performanceTips: [], sqlConceptNotes: [],
+  });
+
   return {
-    operations,
+    operations: operations.map((op, index) => ({ ...op, inputOperationIds: index ? [operations[index - 1].id] : [] })),
     dependencies: Array.from(new Set(dependencies)),
     outputColumns,
   };

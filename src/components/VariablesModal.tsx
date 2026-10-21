@@ -22,42 +22,11 @@ export function generateAutoFillValues(
       filled[v.name] = v.resolvedValue;
       continue;
     }
-    const lower = v.name.toLowerCase();
-    if (lower.includes('valid')) {
-      filled[v.name] = 'pointCount > 0';
-    } else if (lower.includes('anomaly')) {
-      filled[v.name] = "source != 'test'";
-    } else if (lower.includes('predicate') || lower.includes('filter') || lower.includes('join')) {
-      filled[v.name] = "pointCount > 0 AND source != 'test' AND windowEnd IS NOT NULL";
-    } else if (lower.includes('tenant') || lower.includes('org')) {
-      filled[v.name] = "'tenant-fleet-01'";
-    } else if (lower.includes('vehicle')) {
-      filled[v.name] = "'VEH-101'";
-    } else if (lower.includes('user') || lower.includes('author')) {
-      filled[v.name] = "'user-1'";
-    } else if (lower.includes('date') || lower.includes('time')) {
-      filled[v.name] = "'2026-10-20'";
-    } else if (lower.includes('status')) {
-      filled[v.name] = "'HEALTHY'";
-    } else if (lower.includes('limit')) {
-      filled[v.name] = '25';
-    } else if (lower.includes('offset')) {
-      filled[v.name] = '0';
-    } else {
-      filled[v.name] = v.defaultValue || 'TRUE';
-    }
+    // Only use deterministic values; missing runtime inputs need user input.
   }
 
   for (const p of parameters) {
-    if (p.name === '$1') {
-      filled[p.name] = "'tenant-fleet-01'";
-    } else if (p.name === '$2') {
-      filled[p.name] = '0.8';
-    } else if (p.name === '$3') {
-      filled[p.name] = '100';
-    } else {
-      filled[p.name] = `'val_${p.index}'`;
-    }
+    if (p.value !== undefined) filled[p.name] = p.value;
   }
 
   return filled;
@@ -92,7 +61,7 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
 
   const handleAutoFill = () => {
     const autoValues = generateAutoFillValues(variables, parameters);
-    setFormValues(autoValues);
+    setFormValues(prev => ({ ...prev, ...autoValues }));
     setAutoFilledNotice(true);
     setTimeout(() => setAutoFilledNotice(false), 3000);
   };
@@ -109,7 +78,7 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-lg rounded-xl border border-slate-800 bg-slate-900 shadow-2xl flex flex-col overflow-hidden text-slate-200">
+      <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-xl border border-slate-800 bg-slate-900 shadow-2xl flex flex-col overflow-hidden text-slate-200">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-900/90">
           <div className="flex items-center gap-2.5">
@@ -118,7 +87,7 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-semibold text-slate-100">Dynamic SQL Expressions &amp; Parameters</h3>
-              <p className="text-xs text-slate-400">Supply, override, or auto-fill values embedded in template literals</p>
+              <p className="text-xs text-slate-400">Use JSON string arrays for function inputs, SQL text for expressions, and SQL literals for bind parameters.</p>
             </div>
           </div>
           <button
@@ -137,7 +106,7 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
               className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-medium transition-colors"
             >
               <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              <span>Auto-Fill All Parameters</span>
+              <span>Use known values</span>
             </button>
 
             <button
@@ -151,7 +120,7 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
 
           {autoFilledNotice && (
             <span className="text-[11px] text-emerald-400 font-medium animate-pulse flex items-center gap-1">
-              <Check className="w-3 h-3" /> Parameters auto-filled!
+              <Check className="w-3 h-3" /> Known values applied. Enter any missing runtime values.
             </span>
           )}
         </div>
@@ -174,13 +143,15 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
                   {variables.map((v) => (
                     <div key={v.name} className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <span className="text-blue-400 font-semibold">{v.name}</span>
+                        <span className="text-blue-400 font-semibold break-all">{v.name}</span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                           {v.sourceType} · Line {v.line}
                         </span>
                       </div>
-                      <input
-                        type="text"
+                      {v.inputKind === 'string_array' && <p className="text-slate-400">JSON array of SQL predicates, e.g. ["age &gt;= 18"]. Use [] for an empty list.</p>}
+                      <textarea
+                        aria-label={v.name}
+                        rows={v.inputKind === 'string_array' ? 3 : 2}
                         value={formValues[v.name] ?? v.resolvedValue ?? ''}
                         onChange={(e) => handleChange(v.name, e.target.value)}
                         placeholder={v.defaultValue || 'Enter SQL replacement...'}
@@ -206,6 +177,7 @@ export const VariablesModal: React.FC<VariablesModalProps> = ({
                       </div>
                       <input
                         type="text"
+                        aria-label={p.name}
                         value={formValues[p.name] ?? p.value ?? ''}
                         onChange={(e) => handleChange(p.name, e.target.value)}
                         placeholder="e.g. '2026-10-20' or 42"

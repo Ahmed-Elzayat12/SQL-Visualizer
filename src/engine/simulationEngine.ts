@@ -14,6 +14,9 @@ export function simulateQueryExecution(
   parsedQuery: ParsedSqlQuery,
   sampleTables: Record<string, DataRow[]>
 ): StepExecutionResult[] {
+  if (parsedQuery.allOperations.some(operation => operation.type === 'UNION_ALL' || operation.type === 'LATERAL_JOIN')) {
+    throw new Error('UNION and LATERAL are supported for structure analysis only; no simulated rows are produced.');
+  }
   const steps: StepExecutionResult[] = [];
   const intermediateTables: Record<string, DataRow[]> = {};
 
@@ -27,10 +30,14 @@ export function simulateQueryExecution(
   }
 
   let stepCounter = 1;
+  let previousScope: string | undefined;
+  let previousRows: DataRow[] = [];
 
   for (const op of parsedQuery.allOperations) {
     const primaryInputName = (op.inputs[0] || '').toLowerCase();
-    const currentInputRows = intermediateTables[primaryInputName] || [];
+    const currentInputRows = op.type !== 'SOURCE_SCAN' && previousScope === op.cteName
+      ? previousRows
+      : intermediateTables[primaryInputName] || [];
 
     const startTime = performance.now();
     const stepResult = executeOperation(
@@ -101,6 +108,8 @@ export function simulateQueryExecution(
     stepResult.algorithmicComplexity = complexity;
 
     steps.push(stepResult);
+    previousScope = op.cteName;
+    previousRows = stepResult.outputRows;
 
     // If this operation is the last in a CTE, or is part of a CTE, store as intermediate table
     if (op.cteName && op.cteName !== 'final_output') {
@@ -487,7 +496,34 @@ function executeOperation(
       };
     }
 
+    case 'ORDER_BY':
+    case 'FINAL_OUTPUT':
     default: {
+      let outputRows = inputRows;
+      if (op.type === 'ORDER_BY') {
+        const keys = op.sqlSnippet.replace(/^ORDER\s+BY\s+/i, '').replace(/;$/, '').split(',').map(part => {
+          const match = part.trim().match(/^(?:\w+\.)?"?(\w+)"?(?:\s+(ASC|DESC))?$/i);
+          if (!match) throw new Error(`Sample simulation does not support this sort: ${part}`);
+          return { name: match[1], direction: match[2]?.toUpperCase() === 'DESC' ? -1 : 1 };
+        });
+        outputRows = [...inputRows].sort((a, b) => {
+          for (const key of keys) {
+            const left = a[key.name], right = b[key.name];
+            if (left === right) continue;
+            if (left == null) return key.direction;
+            if (right == null) return -key.direction;
+            return (left < right ? -1 : 1) * key.direction;
+          }
+          return 0;
+        });
+      }
+      if (op.type === 'FINAL_OUTPUT' && !op.outputColumns.some(col => col.expression === '*')) {
+        outputRows = inputRows.map(row => {
+          const projected: DataRow = { __rowId: row.__rowId, ...Object.fromEntries(Object.entries(row).filter(([key]) => key.startsWith('__'))) };
+          for (const col of op.outputColumns) projected[col.name] = row[col.sourceColumn ?? col.name];
+          return projected;
+        });
+      }
       return {
         stepIndex,
         operationId: op.id,
@@ -495,7 +531,7 @@ function executeOperation(
         operationType: op.type,
         inputTableName,
         inputRows,
-        outputRows: inputRows,
+        outputRows,
         addedColumns: [],
         removedColumns: [],
         highlightedRowIds: inputRows.map(r => r.__rowId),
@@ -517,30 +553,32 @@ function executeOperation(
   }
 }
 
-/**
- * Evaluates row predicates like "pointCount > 0 AND source = 'teltonika'"
- */
+/** Evaluate simple comparisons without executing SQL or JavaScript. */
 function evaluateRowPredicate(row: DataRow, predicate: string): boolean {
-  if (!predicate || predicate === 'TRUE' || predicate === '1=1') return true;
-
-  // Check pointCount > 0
-  if (predicate.includes('pointCount > 0') && !(row.pointCount > 0)) {
-    return false;
-  }
-  // Check source exclusion
-  if (predicate.includes("source != 'test'") && row.source === 'test') {
-    return false;
-  }
-  // Check receivedAt or windowEnd conditions
-  if (predicate.includes('windowEnd IS NOT NULL') && (row.windowEnd === null || row.windowEnd === undefined)) {
-    return false;
-  }
-  // Check valid flags
-  if (predicate.includes('usable = true') && row.usable !== true) {
-    return false;
-  }
-
-  return true;
+  const condition = predicate.trim().replace(/;$/, '').trim();
+  if (!condition || /^(TRUE|1\s*=\s*1)$/i.test(condition)) return true;
+  if (/^FALSE$/i.test(condition)) return false;
+  // Do not split AND inside a quoted SQL string.
+  const clauses = condition.split(/\s+AND\s+(?=(?:[^']*'(?:''|[^'])*')*[^']*$)/i);
+  return clauses.every(clause => {
+    const nullCheck = clause.match(/^"?(\w+)"?\s+IS\s+(NOT\s+)?NULL$/i);
+    if (nullCheck) return nullCheck[2] ? row[nullCheck[1]] != null : row[nullCheck[1]] == null;
+    const match = clause.match(/^(?:\w+\.)?"?(\w+)"?\s*(>=|<=|<>|!=|=|>|<)\s*('(?:''|[^'])*'|-?\d+(?:\.\d+)?|TRUE|FALSE|NULL)$/i);
+    if (!match) throw new Error(`Sample simulation does not support this filter: ${clause}. Use Structure mode to inspect its SQL.`);
+    const left = row[match[1]];
+    const literal = match[3];
+    const right = /^NULL$/i.test(literal) ? null : /^TRUE$/i.test(literal) ? true : /^FALSE$/i.test(literal) ? false : literal.startsWith("'") ? literal.slice(1, -1).replace(/''/g, "'") : Number(literal);
+    if (left == null || right == null) return false;
+    switch (match[2]) {
+      case '=': return left === right;
+      case '!=': case '<>': return left !== right;
+      case '>': return left > right;
+      case '>=': return left >= right;
+      case '<': return left < right;
+      case '<=': return left <= right;
+      default: return false;
+    }
+  });
 }
 
 /**

@@ -5,6 +5,8 @@ export type SqlOperationType =
   | 'GROUP_BY_AGGREGATE'
   | 'DISTINCT_ON'
   | 'JOIN'
+  | 'UNION_ALL'
+  | 'LATERAL_JOIN'
   | 'CASE_WHEN'
   | 'WINDOW_FUNCTION'
   | 'ORDER_BY'
@@ -41,6 +43,7 @@ export interface LogicalOperation {
   descriptionEn: string;
   descriptionAr: string; // Egyptian Arabic natural explanation
   inputs: string[]; // input CTEs or physical tables
+  inputOperationIds?: string[];
   outputColumns: SqlColumn[];
   performanceTips: {
     category: 'INDEX' | 'MEMORY' | 'CARDINALITY' | 'SCAN' | 'ORDER';

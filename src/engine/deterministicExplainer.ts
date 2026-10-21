@@ -19,6 +19,22 @@ export function getDetailedStepExplanation(
   const isAr = lang === 'ar_eg';
 
   switch (op.type) {
+    case 'UNION_ALL':
+      return {
+        summary: isAr ? 'بيجمع نتايج فروع SELECT في نتيجة واحدة.' : op.descriptionEn,
+        whyItExists: isAr ? 'بيخلي كل فرع يقرأ المصدر المناسب له، وبعدها يجمع الصفوف في نفس الأعمدة.' : 'Lets each branch read its own source before combining compatible output columns.',
+        dataTransformation: isAr ? 'UNION ALL بيحتفظ بالتكرار. الرسم بيوضح الفروع والدمج؛ مفيش بيانات فعلية متنفذة هنا.' : 'UNION ALL preserves duplicates. This preview shows branch dependencies without executing rows.',
+        performanceNote: isAr ? 'الأداء الفعلي محتاج EXPLAIN من قاعدة البيانات.' : 'Use a database EXPLAIN plan for actual performance.',
+        faqAnswers: [],
+      };
+    case 'LATERAL_JOIN':
+      return {
+        summary: isAr ? 'بيحسب استعلام مرتبط بكل صف من المصدر.' : op.descriptionEn,
+        whyItExists: isAr ? 'بيسمح بحساب قيمة زي usable باستخدام أعمدة الصف الحالي، وبعدها استعمالها في SELECT أو WHERE.' : 'Computes values such as usable from the current source row for later SELECT or WHERE expressions.',
+        dataTransformation: isAr ? 'الاستعلام الداخلي بيشوف قيم الصف الخارجي. LATERAL مش جدول مستقل.' : 'The subquery can reference the outer row. LATERAL is not a physical table.',
+        performanceNote: isAr ? 'تكلفة التنفيذ بتعتمد على الاستعلام الداخلي وعدد صفوف المصدر.' : 'Cost depends on the correlated subquery and source cardinality.',
+        faqAnswers: [],
+      };
     case 'DISTINCT_ON': {
       if (isAr) {
         return {
@@ -78,7 +94,7 @@ export function getDetailedStepExplanation(
       return {
         summary: 'Aggregates multiple rows sharing the same key into a single summary row per group.',
         whyItExists: 'Condenses raw batch records into high-level metrics (totals, counts, timestamps).',
-        dataTransformation: 'Multiple records per vehicle are collapsed into 1 row with calculated aggregate values.',
+        dataTransformation: 'Multiple records per group are combined into one row with calculated aggregate values.',
         performanceNote: 'Check work_mem size. If the hash table exceeds memory, PostgreSQL spills HashAgg buckets to temp disk files.',
         faqAnswers: [
           {
@@ -116,7 +132,7 @@ export function getDetailedStepExplanation(
         faqAnswers: [
           {
             question: 'Why was this row excluded?',
-            answer: 'The row failed one of the WHERE clauses (e.g. pointCount was 0 or source matched excluded list).',
+            answer: 'The row failed one of the WHERE clauses .',
           },
         ],
       };
@@ -143,17 +159,17 @@ export function getDetailedStepExplanation(
       }
       return {
         summary: 'Combines columns from two relation sources based on common join keys.',
-        whyItExists: 'Brings together aggregate statistics and latest GPS coordinates into a unified record.',
+        whyItExists: 'Combines related records from two tables.',
         dataTransformation: 'Rows matching the ON condition are merged horizontally. Missing right rows in LEFT JOIN get filled with NULLs.',
         performanceNote: 'Verify join column indexes to prevent slow O(N*M) nested loops.',
         faqAnswers: [
           {
             question: 'Why are there NULL values after this LEFT JOIN?',
-            answer: 'The vehicle existed on the left relation, but had no corresponding record on the right relation.',
+            answer: 'A row on the left had no corresponding record on the right.',
           },
           {
             question: 'Could this JOIN create duplicate rows?',
-            answer: 'It would if the right side had multiple rows per vehicleId. Using a DISTINCT ON CTE on the right side prevents row multiplication.',
+            answer: 'Yes. Multiple matches on the right produce multiple output rows for each left row.',
           },
         ],
       };
